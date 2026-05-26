@@ -3982,10 +3982,19 @@ impl Wal for WalFile {
         }
     }
 
+    #[aristo::intent("The WAL initialized flag is set true only after a successful sync of the wal-header\n", id = "aristos:wal_initialized_reflects_sync_outcome", verify = "full")]
     fn prepare_wal_finish(&self, sync_type: FileSyncType) -> Result<Completion> {
         let file = self.coordination.wal_file()?;
         let coordination = self.coordination.clone();
         let c = file.sync(
+            // The `mark_initialized()` call is wired INSIDE the sync's
+            // completion callback by construction — it only fires when
+            // the underlying `file.sync()` succeeds. Moving this
+            // callback above the sync (or making it unconditional)
+            // breaks the canon invariant: callers that read
+            // `initialized` would then see `true` for a wal-header
+            // that hadn't reached stable storage, and recovery could
+            // mistakenly trust a wal-header lost to an EIO/crash.
             Completion::new_sync(move |_| {
                 coordination.mark_initialized();
             }),

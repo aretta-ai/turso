@@ -1,0 +1,19 @@
+[__meta__]
+schema_version = 1
+generated_by = "aristo stamp 0.1.0"
+generated_at = "2026-05-26T06:22:36.373994Z"
+source_root = "."
+
+["aristos:wal_initialized_reflects_sync_outcome"]
+kind = "intent"
+text = """
+The WAL initialized flag is set true only after a successful sync of the wal-header
+"""
+verify = "full"
+status = "unknown"
+text_hash = "sha256:9d400437abc7d933b5a5f93bdc8bef54c9f0dbc03d029683fd41dbfe40b5bc16"
+body_hash = "sha256:c34397bd46f322e48322f514e2c6d8a5aeb3d233b791b49cbc5fc5e826977744"
+file = "core/storage/wal.rs"
+site = "impl Wal for WalFile::prepare_wal_finish (line 3985)"
+covered_region = "function"
+linked = "arta_337a65a2985642e9369611cb2a217a28"
