@@ -1,7 +1,7 @@
 [__meta__]
 schema_version = 1
 generated_by = "aristo stamp 0.1.0"
-generated_at = "2026-05-26T06:22:36.373994Z"
+generated_at = "2026-05-29T23:26:37.874723Z"
 source_root = "."
 
 ["aristos:wal_initialized_reflects_sync_outcome"]
