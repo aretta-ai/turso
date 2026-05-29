@@ -1,0 +1,22 @@
+# Aristo lite PR gate — the cheap, local checks (stamp/lint/doc) via the shared
+# aristo-action. No token needed; runs entirely on the runner.
+#
+#   stamp --check  — .aristo/index.toml is in sync with the source
+#   lint  --check  — annotation quality (strict: warnings fail the build)
+#   doc   --check  — generated .aristo/doc/*.md are in sync with the index
+#
+# Heavy canon verification (`aristo verify`) is a separate workflow:
+# .github/workflows/aristo-verify.yml (manual + nightly, needs ARETTA_TOKEN).
+name: aristo
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  aristo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aretta-ai/aristo-action@v1
+        with:
+          checks: stamp, lint, doc

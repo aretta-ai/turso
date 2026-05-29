@@ -1,0 +1,25 @@
+# Aristo heavy verification — runs `aristo verify` (server-side canon
+# conformance) for all bound annotations in .aristo/index.toml. This clones,
+# builds, and runs the conformance harness on Aretta's infrastructure and
+# reports back, so it needs an Aretta token.
+#
+# Triggers: manual (workflow_dispatch) + nightly. NOT on pull_request — verify
+# requires the checked-out commit to exist on origin, and a PR's synthetic
+# merge-commit HEAD is not pushed.
+#
+# Setup: add the repo secret ARETTA_TOKEN (value = your arta_* token; mint one
+# with `aristo auth login`). See .github/workflows/aristo.yml for the lite gate.
+name: aristo verify
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * *' # nightly at 07:00 UTC
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aretta-ai/aristo-action@v1
+        with:
+          checks: verify
+          aretta-token: ${{ secrets.ARETTA_TOKEN }}
