@@ -17,6 +17,12 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      # Target the dev environment (value managed via the ARETTA_API_URL repo
+      # Variable) until the verify infra ships to prod. Remove this / clear the
+      # Variable to fall back to the default (prod) server. The job-level env
+      # propagates into the composite action's verify step.
+      ARETTA_API_URL: ${{ vars.ARETTA_API_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: aretta-ai/aristo-action@v1
