@@ -3230,6 +3230,7 @@ impl Wal for WalFile {
 
     /// Find the latest frame containing a page.
     #[instrument(skip_all, level = Level::DEBUG)]
+    #[aristo::intent("find_frame never reads outside the live frame range [nbackfills, max_frame]\n", id = "aristos:wal_find_frame_range_invariant", verify = "full")]
     fn find_frame(&self, page_id: u64, frame_watermark: Option<u64>) -> Result<Option<u64>> {
         #[cfg(not(feature = "conn_raw_api"))]
         turso_assert!(
@@ -3832,6 +3833,7 @@ impl Wal for WalFile {
         });
     }
 
+    #[aristo::intent("Writers and VACUUM serialize: at most one of them can modify the database at any instant\n", id = "aristos:vacuum_single_writer_serialized", verify = "full")]
     fn begin_vacuum_blocking_tx(&self) -> Result<()> {
         turso_assert!(
             self.max_frame_read_lock_index.load(Ordering::Acquire) == NO_LOCK_HELD,
@@ -4448,6 +4450,7 @@ impl WalFile {
         Ok(())
     }
 
+    #[aristo::intent("A checkpoint failure must not leak frames into the main database file\n", id = "aristos:wal_checkpoint_error_no_db_leak", verify = "full")]
     fn checkpoint_inner(
         &self,
         pager: &Pager,
@@ -4839,6 +4842,7 @@ impl WalFile {
     }
 
     /// Truncate WAL file to zero and sync it. Called by pager AFTER DB file is synced.
+    #[aristo::intent("WAL truncate is atomic: no committed frame can be observed lost across the truncate operation\n", id = "aristos:wal_truncate_atomic_under_concurrent_writers", verify = "full")]
     fn truncate_log(
         &self,
         result: &mut CheckpointResult,
