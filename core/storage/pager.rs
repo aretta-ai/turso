@@ -3650,7 +3650,7 @@ impl Pager {
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
-    #[aristo::intent("A commit frame must reach stable storage via fsync before the transaction is reported as durable\n", id = "aristos:wal_commit_requires_fsync", verify = "full")]
+    #[aristo::intent("A commit frame must reach stable storage via fsync before the transaction is reported as durable\n", id = "aristos:wal_commit_requires_fsync", verify = "full", parent = "wal_protocol_correctness")]
     fn commit_dirty_pages_inner(
         &self,
         allowed_auto_actions: WalAutoActions,
@@ -4139,7 +4139,7 @@ impl Pager {
         )
     }
 
-    #[aristo::intent("The nbackfills counter advances after frames are durable, so recovery never replays already-checkpointed frames\n", id = "aristos:wal_nbackfills_orders_with_recovery", verify = "full")]
+    #[aristo::intent("The nbackfills counter advances after frames are durable, so recovery never replays already-checkpointed frames\n", id = "aristos:wal_nbackfills_orders_with_recovery", verify = "full", parent = "wal_protocol_correctness")]
     fn checkpoint_inner(
         &self,
         mode: CheckpointMode,
