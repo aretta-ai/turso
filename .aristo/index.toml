@@ -1,7 +1,7 @@
 [__meta__]
 schema_version = 1
 generated_by = "aristo stamp 0.1.0"
-generated_at = "2026-05-30T06:10:00.139127Z"
+generated_at = "2026-05-30T06:23:28.793238Z"
 source_root = "."
 
 ["aristos:vacuum_atomic_under_crash"]
@@ -14,9 +14,10 @@ status = "unknown"
 text_hash = "sha256:37b6b24fd36fdb06c538061105e634c6cc8919f3bf9ad2dbf7ec76209b5f63ac"
 body_hash = "sha256:b035894cd90057e5515ba7cb36e797c2e0efb4203daab221ce89a58b716e55ca"
 file = "core/vdbe/vacuum.rs"
-site = "fn vacuum_in_place_step (line 1618)"
+site = "fn vacuum_in_place_step (line 1619)"
 covered_region = "function"
 linked = "arta_ebf510077ded2740be418270ef1e94f3"
+parent = "storage_compaction_correctness"
 
 ["aristos:vacuum_change_counter_monotone"]
 kind = "intent"
@@ -31,6 +32,7 @@ file = "core/vdbe/vacuum.rs"
 site = "impl VacuumDbHeaderMeta::from_source_header (line 188)"
 covered_region = "function"
 linked = "arta_ab500da2690c2fc27e52e7c257b9e4fa"
+parent = "storage_compaction_correctness"
 
 ["aristos:vacuum_page_count_oracle_exact"]
 kind = "intent"
@@ -45,6 +47,7 @@ file = "core/vdbe/vacuum.rs"
 site = "fn vacuum_target_build_step (line 502)"
 covered_region = "function"
 linked = "arta_6a32c0726e4fc32af61fd93dd5bc8266"
+parent = "storage_compaction_correctness"
 
 ["aristos:vacuum_preserves_logical_content"]
 kind = "intent"
@@ -56,9 +59,10 @@ status = "unknown"
 text_hash = "sha256:71c6bdb60e8f98c332346046892cfdaceda8a8efe537e5c3a5eaeb9f408dde33"
 body_hash = "sha256:b035894cd90057e5515ba7cb36e797c2e0efb4203daab221ce89a58b716e55ca"
 file = "core/vdbe/vacuum.rs"
-site = "fn vacuum_in_place_step (line 1617)"
+site = "fn vacuum_in_place_step (line 1618)"
 covered_region = "function"
 linked = "arta_6e8f420681bff378e8376109fa48b17b"
+parent = "storage_compaction_correctness"
 
 ["aristos:vacuum_single_writer_serialized"]
 kind = "intent"
@@ -70,9 +74,10 @@ status = "unknown"
 text_hash = "sha256:c516c52be533da94308ee5c572cbb56c30170ef7bca468e50ba7442f11bc8154"
 body_hash = "sha256:467c49b27c8825455766d44bea9ce5dbd1365c3e133a8c54638d8eb8ffe7905a"
 file = "core/storage/wal.rs"
-site = "impl Wal for WalFile::begin_vacuum_blocking_tx (line 3836)"
+site = "impl Wal for WalFile::begin_vacuum_blocking_tx (line 3838)"
 covered_region = "function"
 linked = "arta_9bceea551b43cdbc4e8a9a6976abc588"
+parent = "single_writer_serialization"
 
 ["aristos:wal_checkpoint_error_no_db_leak"]
 kind = "intent"
@@ -84,9 +89,10 @@ status = "unknown"
 text_hash = "sha256:99cf0a4664b81492fcaf3eaace7c7ab17a51261a6c340c7cad8faae4be7d45cc"
 body_hash = "sha256:2727118573a856c66181d9e5a2ccee4771c8a7a6e0474f19f84254b141f7ae31"
 file = "core/storage/wal.rs"
-site = "impl WalFile::checkpoint_inner (line 4453)"
+site = "impl WalFile::checkpoint_inner (line 4455)"
 covered_region = "function"
 linked = "arta_5cc2507abbafa1dcca819c702e32c824"
+parent = "wal_protocol_correctness"
 
 ["aristos:wal_commit_requires_fsync"]
 kind = "intent"
@@ -101,6 +107,7 @@ file = "core/storage/pager.rs"
 site = "impl Pager::commit_dirty_pages_inner (line 3653)"
 covered_region = "function"
 linked = "arta_e376126754850310276ec5c621c3c717"
+parent = "wal_protocol_correctness"
 
 ["aristos:wal_find_frame_range_invariant"]
 kind = "intent"
@@ -112,9 +119,10 @@ status = "unknown"
 text_hash = "sha256:a6a6aabf707adfe418c11bc5ea417c1364c926f72ee5f05bd27b8b6aac7b34f5"
 body_hash = "sha256:fef85530b91ee16bee42f6aee06f26b3c3f32b0eafd94f3d8ccec789554d110a"
 file = "core/storage/wal.rs"
-site = "impl Wal for WalFile::find_frame (line 3233)"
+site = "impl Wal for WalFile::find_frame (line 3235)"
 covered_region = "function"
 linked = "arta_961fe492d27d1abdb6f6af1e6a38ac79"
+parent = "wal_protocol_correctness"
 
 ["aristos:wal_initialized_reflects_sync_outcome"]
 kind = "intent"
@@ -126,9 +134,10 @@ status = "unknown"
 text_hash = "sha256:9d400437abc7d933b5a5f93bdc8bef54c9f0dbc03d029683fd41dbfe40b5bc16"
 body_hash = "sha256:c34397bd46f322e48322f514e2c6d8a5aeb3d233b791b49cbc5fc5e826977744"
 file = "core/storage/wal.rs"
-site = "impl Wal for WalFile::prepare_wal_finish (line 3987)"
+site = "impl Wal for WalFile::prepare_wal_finish (line 3989)"
 covered_region = "function"
 linked = "arta_337a65a2985642e9369611cb2a217a28"
+parent = "wal_protocol_correctness"
 
 ["aristos:wal_nbackfills_orders_with_recovery"]
 kind = "intent"
@@ -143,6 +152,7 @@ file = "core/storage/pager.rs"
 site = "impl Pager::checkpoint_inner (line 4142)"
 covered_region = "function"
 linked = "arta_40ceca467c64335d30ced059369d412f"
+parent = "wal_protocol_correctness"
 
 ["aristos:wal_truncate_atomic_under_concurrent_writers"]
 kind = "intent"
@@ -154,6 +164,40 @@ status = "unknown"
 text_hash = "sha256:3d260cf86a59e54d02ee3224cc3951b4c17aa0488e8be1109cf70e0912eef1ae"
 body_hash = "sha256:05185c3220c7a3336b932e56abace4aeb02d2e59791bd490705d036c41afd850"
 file = "core/storage/wal.rs"
-site = "impl WalFile::truncate_log (line 4845)"
+site = "impl WalFile::truncate_log (line 4847)"
 covered_region = "function"
 linked = "arta_013316bc46e9af51cf52612fe2533e90"
+parent = "wal_protocol_correctness"
+
+[single_writer_serialization]
+kind = "intent"
+text = "At most one write transaction is active at any time."
+verify = "neural"
+status = "unknown"
+text_hash = "sha256:d16aa772ea444a24fe7d5b54b1ecc927219bf244b7766fab6df8900c11fcbed1"
+body_hash = "sha256:5fc204131678684ae7e095733a29dea9176ed9aeeb95dbed62dc62c2fc370595"
+file = "core/storage/wal.rs"
+site = "impl Wal for WalFile::begin_write_tx (line 3134)"
+covered_region = "function"
+
+[storage_compaction_correctness]
+kind = "intent"
+text = "A compaction operation preserves logical content, preserves all schema and engine metadata, does not increase physical footprint, and is atomic under crash."
+verify = "neural"
+status = "unknown"
+text_hash = "sha256:97fe88919d9e3576ad0a1cf49c9f78dc6dde1cbac96ecaa828373ead0229a0fc"
+body_hash = "sha256:e7556fd9b3ab8de47ceb763405164978d7e26dfd440d4cbd7e98059b05571796"
+file = "core/vdbe/vacuum.rs"
+site = "impl VacuumInPlaceOpContext::step (line 1309)"
+covered_region = "function"
+
+[wal_protocol_correctness]
+kind = "intent"
+text = "The WAL subsystem maintains LSN monotonicity, frame commitment ordering, recovery idempotency, checkpoint safety, and group commit atomicity."
+verify = "neural"
+status = "unknown"
+text_hash = "sha256:9e70f3e012c13ec400044e473cb06d4935d943af34d40aa0e04d7acb7e3ada86"
+body_hash = "sha256:3627e8fd855d64d269a1c927fe4a88b02e1edd4db64e2ffc93b704d24b701552"
+file = "core/storage/wal.rs"
+site = "trait Wal (line 597)"
+covered_region = "type"

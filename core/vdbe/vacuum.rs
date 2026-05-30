@@ -185,7 +185,7 @@ pub(crate) struct VacuumDbHeaderMeta {
 }
 
 impl VacuumDbHeaderMeta {
-    #[aristo::intent("The database header's change_counter is monotonically non-decreasing across all modifying operations, including VACUUM\n", id = "aristos:vacuum_change_counter_monotone", verify = "full")]
+    #[aristo::intent("The database header's change_counter is monotonically non-decreasing across all modifying operations, including VACUUM\n", id = "aristos:vacuum_change_counter_monotone", verify = "full", parent = "storage_compaction_correctness")]
     pub(crate) fn from_source_header(source: &DatabaseHeader) -> Self {
         Self {
             read_version: source.read_version,
@@ -499,7 +499,7 @@ pub(crate) enum VacuumTargetBuildPhase {
 ///    Custom index methods (FTS, vector) recreate and backfill their backing
 ///    indexes from the copied table data in this phase.
 /// 7. Finalizes target database header metadata, then commits the target transaction.
-#[aristo::intent("After VACUUM, the database file's page count equals the formal model's prediction (pre-vacuum allocated pages minus the pre-vacuum freelist)\n", id = "aristos:vacuum_page_count_oracle_exact", verify = "full")]
+#[aristo::intent("After VACUUM, the database file's page count equals the formal model's prediction (pre-vacuum allocated pages minus the pre-vacuum freelist)\n", id = "aristos:vacuum_page_count_oracle_exact", verify = "full", parent = "storage_compaction_correctness")]
 pub(crate) fn vacuum_target_build_step(
     config: &VacuumTargetBuildConfig,
     state: &mut VacuumTargetBuildContext,
@@ -1306,6 +1306,7 @@ impl VacuumInPlaceOpContext {
         }
     }
 
+    #[aristo::intent("A compaction operation preserves logical content, preserves all schema and engine metadata, does not increase physical footprint, and is atomic under crash.", id = "storage_compaction_correctness", verify = "neural")]
     pub(crate) fn step(&mut self, connection: &Arc<Connection>) -> Result<IOResult<()>> {
         vacuum_in_place_step(
             connection,
@@ -1614,8 +1615,8 @@ fn reload_physical_schema_for_mvcc_vacuum(
 ///
 /// `cleanup_state` independently tracks which resources the opcode has acquired so
 /// that cleanup can roll back correctly
-#[aristo::intent("VACUUM preserves the database's logical content\n", id = "aristos:vacuum_preserves_logical_content", verify = "full")]
-#[aristo::intent("VACUUM is atomic under crash: recovery yields either the pre-VACUUM state or the post-VACUUM state, never an intermediate\n", id = "aristos:vacuum_atomic_under_crash", verify = "full")]
+#[aristo::intent("VACUUM preserves the database's logical content\n", id = "aristos:vacuum_preserves_logical_content", verify = "full", parent = "storage_compaction_correctness")]
+#[aristo::intent("VACUUM is atomic under crash: recovery yields either the pre-VACUUM state or the post-VACUUM state, never an intermediate\n", id = "aristos:vacuum_atomic_under_crash", verify = "full", parent = "storage_compaction_correctness")]
 fn vacuum_in_place_step(
     connection: &Arc<Connection>,
     db: usize,
