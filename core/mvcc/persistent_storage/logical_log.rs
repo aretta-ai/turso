@@ -597,6 +597,20 @@ impl LogicalLog {
         self.header.as_ref()
     }
 
+    /// Differential-testing accessor for the aretta-books LogicalLog
+    /// conformance harness (C-1 catch, publish-before-fsync of the
+    /// header upgrade). Returns the in-memory header version so the
+    /// harness can observe an advance past the durable header that
+    /// signals the bug at `write_header` line ~953.
+    ///
+    /// **NEVER use in production.** Catalog row:
+    /// `verification/db/flavors/turso/ACCESSORS.md` (in the
+    /// aretta-books repo).
+    #[cfg(feature = "differential-accessors")]
+    pub fn diff_header_version(&self) -> Option<u8> {
+        self.header.as_ref().map(|h| h.version)
+    }
+
     pub(crate) fn encryption_ctx(&self) -> Option<&EncryptionContext> {
         self.encryption_ctx.as_ref()
     }
