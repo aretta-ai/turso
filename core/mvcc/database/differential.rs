@@ -132,6 +132,31 @@ impl<Clock: LogicalClock> MvStore<Clock> {
         self.version_id_counter.load(Ordering::Acquire)
     }
 
+    /// Peek the next commit timestamp the clock would publish, without
+    /// consuming it. Mirrors the semantic of the Lean model's
+    /// `MvccState.nextTs` — "the smallest timestamp the next commit
+    /// could plausibly be assigned, given everything that has already
+    /// committed".
+    ///
+    /// Implementation: derived from `last_committed_tx_ts + 1`. We do
+    /// NOT peek `MvccClock`'s internal `Mutex<u64>` because the clock
+    /// burns timestamps on `begin_tx` as well as `commit_tx`, while
+    /// Lean's `nextTs` advances only on commit. The
+    /// `last_committed_tx_ts` atomic is published by `commit_tx`
+    /// alongside the durable commit so it tracks the same monotone
+    /// landmark Lean does.
+    ///
+    /// Note: in the empty state both this accessor and Lean's
+    /// `nextTs` are 0 only if no commit has happened. The accessor
+    /// returns `last_committed_tx_ts + 1` (so after a commit at ts=1
+    /// it returns 2, matching Lean's `nextTs := max(nextTs, ts+1)`).
+    /// To make the after-begin boundary line up, the Lean model's
+    /// `Op.begin` handler maxes `nextTs` against `extBeginTs + 1` —
+    /// see `Step.lean::Op.begin`.
+    pub fn diff_peek_next_ts(&self) -> u64 {
+        self.last_committed_tx_ts.load(Ordering::Acquire) + 1
+    }
+
     /// Look up the commit timestamp for `tx_id`. Checks
     /// `finalized_tx_states` first (where committed txns live after
     /// the commit-state-machine drives to terminal), falling back to
