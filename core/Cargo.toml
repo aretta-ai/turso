@@ -20,6 +20,12 @@ path = "lib.rs"
 default = ["fs", "uuid", "time", "json", "series", "encryption", "percentile"]
 tracing_release = ["tracing/release_max_level_info"]
 conn_raw_api = []
+# Aretta Books MVCC conformance harness — exposes owned snapshots of
+# private `MvStore` internals (`txs`, `finalized_tx_states`, counter
+# values, commit_ts lookup) for differential testing against the Lean
+# model at `formal/ArettaBooks/Flavors/Turso/MvccModel/`. Never use in
+# production; only the verification crate enables this.
+differential-accessors = []
 fs = ["turso_ext/vfs"]
 json = []
 uuid = ["dep:uuid"]

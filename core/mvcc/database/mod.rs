@@ -58,6 +58,12 @@ pub use checkpoint_state_machine::{
     sqlite_schema_btree_identity, CheckpointState, CheckpointStateMachine,
 };
 
+/// Differential-testing accessors for the Aretta Books MVCC
+/// conformance harness. Gated on the `differential-accessors`
+/// feature; never compiled in production builds.
+#[cfg(feature = "differential-accessors")]
+pub mod differential;
+
 #[cfg(feature = "conn_raw_api")]
 use super::persistent_storage::logical_log::{
     encode_delete_portable_extension, parse_ops_from_plaintext, LOG_RECORD_PREFIX_SIZE,
