@@ -440,6 +440,40 @@ impl LogRecord {
         Self::new(tx_timestamp)
     }
 
+    /// Differential-testing helper for the aretta-books H-2 catch — appends
+    /// an OP_UPDATE_HEADER entry to the buffer WITHOUT enforcing the
+    /// `!self.has_header` invariant that both `LogRecord::push_header`
+    /// (test helper at the top of this impl) and the production producer
+    /// `DurableStorage::serialize_database_header` (in
+    /// `core/mvcc/persistent_storage/mod.rs`) `assert!` on.
+    ///
+    /// Lives under `differential-accessors`; **the production code paths
+    /// keep the assert.** This accessor exists solely so the harness can
+    /// construct a malformed multi-header `LogRecord` that the writers
+    /// refuse to emit, drive it through `LogicalLog::log_tx`, and observe
+    /// that the parser+apply pipeline silently accepts it — the writer
+    /// vs reader asymmetry the H-2 catch witnesses.
+    ///
+    /// Mirrors the production `serialize_database_header` body MINUS the
+    /// assert: appends the OP_UPDATE_HEADER entry via
+    /// `serialize_header_entry`, sets `has_header = true`, increments
+    /// `op_count`.
+    ///
+    /// **NEVER use in production.** Catalog row 10: `verification/db/flavors/turso/ACCESSORS.md`
+    /// (in the aretta-books repo).
+    #[cfg(feature = "differential-accessors")]
+    pub fn push_header_for_test(&mut self, header: &DatabaseHeader) {
+        crate::mvcc::persistent_storage::logical_log::serialize_header_entry(
+            &mut self.buf,
+            header,
+        );
+        self.has_header = true;
+        self.op_count = self
+            .op_count
+            .checked_add(1)
+            .expect("LogRecord::push_header_for_test: op_count exceeds u32");
+    }
+
     /// True iff no ops (row versions or header) have been appended.
     pub fn is_empty(&self) -> bool {
         let empty = self.op_count == 0;

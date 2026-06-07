@@ -1861,6 +1861,25 @@ impl StreamingLogicalLogReader {
     /// Recovery needs the whole frame so it can decide which schema snapshot should decode each
     /// index op. Empty parsed frames are skipped, so callers that receive Some(frame) can
     /// rely on `frame` being non-empty.
+    /// Differential-testing accessor for the aretta-books H-2 catch —
+    /// exposes the `pub(crate) next_frame` so the harness can observe
+    /// the parser's per-tx `Vec<ParsedOp>` output. Used together with
+    /// `LogRecord::push_header_for_test` (catalog row 10) to drive a
+    /// malformed multi-OP_UPDATE_HEADER tx through the writer + reader
+    /// pipeline and witness that the reader silently accepts it (the
+    /// writer-side invariant is implicit on the read side — see the
+    /// scenario module doc for the asymmetric-invariant test pattern).
+    ///
+    /// **NEVER use in production.** Catalog row 11: `verification/db/flavors/turso/ACCESSORS.md`
+    /// (in the aretta-books repo).
+    #[cfg(feature = "differential-accessors")]
+    pub fn next_frame_for_test(
+        &mut self,
+        io: &Arc<dyn crate::IO>,
+    ) -> Result<Option<Vec<ParsedOp>>> {
+        self.next_frame(io)
+    }
+
     pub(crate) fn next_frame(&mut self, io: &Arc<dyn crate::IO>) -> Result<Option<Vec<ParsedOp>>> {
         loop {
             match self.state {
@@ -3492,8 +3511,21 @@ pub struct ParsedFrame {
     pub end_offset: usize,
 }
 
+/// Parser output for a single op in a logical-log transaction frame.
+///
+/// `pub` (rather than `pub(crate)`) so the `differential-accessors`
+/// gated `StreamingLogicalLogReader::next_frame_for_test` can return
+/// it through the crate boundary for the aretta-books H-2 catch. The
+/// variants reference only types that were already `pub`
+/// (`MVTableId`, `RowID`, `DatabaseHeader`, `Vec<u8>`); this raises
+/// no new internal types into the public surface. Marked
+/// `#[doc(hidden)]` to signal it isn't part of the stable public API
+/// — production callers should consume `StreamingResult` (via the
+/// streaming consumer paths) or `MvStore`'s commit machinery
+/// directly.
+#[doc(hidden)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub(crate) enum ParsedOp {
+pub enum ParsedOp {
     UpsertTable {
         table_id: MVTableId,
         rowid: RowID,
