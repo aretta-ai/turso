@@ -1,0 +1,5 @@
+error: #[diff(snapshot = ...)] only supports SkipMap<K, V> fields in Phase 2; other collection types (BTreeMap, HashMap, ...) deferred
+  --> tests/ui/06_snapshot_on_non_skipmap.rs:22:13
+   |
+22 |     states: std::collections::BTreeMap<u64, State>,
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

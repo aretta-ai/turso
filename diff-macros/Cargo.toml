@@ -29,3 +29,6 @@ syn = { version = "2.0.96", features = ["full"] }
 
 [dev-dependencies]
 trybuild = "1.0"
+# Phase 2 trybuild cases exercise `snapshot = ...` on `SkipMap<K, V>` —
+# the real collection used by `MvStore` in `turso_core`.
+crossbeam-skiplist = "0.1.3"

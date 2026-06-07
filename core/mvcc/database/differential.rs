@@ -21,7 +21,7 @@
 //! Lean-projected fields.
 
 use crate::mvcc::clock::LogicalClock;
-use crate::mvcc::database::{MvStore, RowID, TransactionState, TxID};
+use crate::mvcc::database::{MvStore, RowID, Transaction, TransactionState, TxID};
 use crate::sync::atomic::Ordering;
 
 /// Owned snapshot of a `TransactionState`. Mirrors the private enum.
@@ -69,56 +69,47 @@ pub struct TxnSnapshot {
 /// documents which `MvStore` field each accessor reads.
 pub type FinalStateSnapshot = TxnStateSnapshot;
 
+/// Project a live `Transaction` into a `TxnSnapshot` — used by the
+/// macro-generated `MvStore::diff_txs` accessor (ACCESSORS.md row 1).
+/// Reads the atomic state slot with `Acquire`, mirrors `TransactionState`
+/// via `TxnStateSnapshot::from`, locks the write-set Mutex to copy
+/// `RowID`s out, and sorts the resulting list. The sort is part of the
+/// catalog contract — the Lean side performs the same canonicalization.
+impl From<&Transaction> for TxnSnapshot {
+    fn from(tx: &Transaction) -> Self {
+        // `AtomicTransactionState::state` is `pub(crate)`; child-module
+        // visibility lets us read it directly without consuming the
+        // atomic via `From`.
+        let encoded = tx.state.state.load(Ordering::Acquire);
+        let state = TxnStateSnapshot::from(TransactionState::decode(encoded));
+        let begin_ts = tx.begin_ts;
+        let mut write_set: Vec<RowID> = tx
+            .write_set
+            .lock()
+            .entries
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect();
+        write_set.sort();
+        TxnSnapshot {
+            state,
+            begin_ts,
+            write_set,
+        }
+    }
+}
+
+/// Project a borrowed `TransactionState` into a `FinalStateSnapshot`
+/// (= `TxnStateSnapshot`) — used by the macro-generated
+/// `MvStore::diff_finalized` accessor (ACCESSORS.md row 2). Trivial
+/// Copy-deref into the existing `From<TransactionState>` impl.
+impl From<&TransactionState> for FinalStateSnapshot {
+    fn from(s: &TransactionState) -> Self {
+        TxnStateSnapshot::from(*s)
+    }
+}
+
 impl<Clock: LogicalClock> MvStore<Clock> {
-    /// Owned snapshot of `MvStore::txs` (live transactions), sorted
-    /// ascending by `TxID`. `write_set` per txn is also sorted; see
-    /// `TxnSnapshot::write_set` for the rationale.
-    pub fn diff_txs(&self) -> Vec<(TxID, TxnSnapshot)> {
-        let mut out: Vec<(TxID, TxnSnapshot)> = self
-            .txs
-            .iter()
-            .map(|entry| {
-                let tx_id = *entry.key();
-                let tx = entry.value();
-                // `AtomicTransactionState::state` is `pub(crate)`;
-                // child-module visibility lets us read it directly
-                // without consuming the atomic via `From`.
-                let encoded = tx.state.state.load(Ordering::Acquire);
-                let state = TxnStateSnapshot::from(
-                    TransactionState::decode(encoded),
-                );
-                let begin_ts = tx.begin_ts;
-                let mut write_set: Vec<RowID> = tx
-                    .write_set
-                    .lock()
-                    .entries
-                    .iter()
-                    .map(|(id, _)| id.clone())
-                    .collect();
-                write_set.sort();
-                (tx_id, TxnSnapshot { state, begin_ts, write_set })
-            })
-            .collect();
-        out.sort_by_key(|p| p.0);
-        out
-    }
-
-    /// Owned snapshot of `MvStore::finalized_tx_states` (removed-but-
-    /// still-referenced txns), sorted ascending by `TxID`.
-    pub fn diff_finalized(&self) -> Vec<(TxID, FinalStateSnapshot)> {
-        let mut out: Vec<(TxID, FinalStateSnapshot)> = self
-            .finalized_tx_states
-            .iter()
-            .map(|entry| {
-                let tx_id = *entry.key();
-                let state = TxnStateSnapshot::from(*entry.value());
-                (tx_id, state)
-            })
-            .collect();
-        out.sort_by_key(|p| p.0);
-        out
-    }
-
     /// Current value of `MvStore::tx_ids` (the next-tx-id allocator).
     /// Reads with `Acquire` to align with the allocator's `fetch_add`.
     pub fn diff_tx_ids_value(&self) -> u64 {

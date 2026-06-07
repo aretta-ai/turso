@@ -1,0 +1,5 @@
+error: #[diff(...)] cannot combine `expose = [...]` (Phase 1, scalar projection of Option<T>) with `snapshot = ...` (Phase 2, wrapper projection of SkipMap<K, V>) on the same field
+  --> tests/ui/07_expose_and_snapshot_conflict.rs:20:10
+   |
+20 |     txs: SkipMap<u64, Tx>,
+   |          ^^^^^^^^^^^^^^^^

@@ -1621,6 +1621,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 name = "diff_macros"
 version = "0.7.0-pre.4"
 dependencies = [
+ "crossbeam-skiplist",
  "proc-macro2",
  "quote",
  "syn 2.0.100",

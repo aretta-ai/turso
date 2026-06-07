@@ -1,4 +1,4 @@
-error: #[diff(expose = [...])] only supports Option<T> fields in Phase 1; wrapper-projection and parameterized lookup are deferred
+error: #[diff(expose = [...])] only supports Option<T> fields in Phase 1; wrapper-projection uses `snapshot = ...` on a `SkipMap<K, V>` field
   --> tests/ui/03_unsupported_field_type.rs:13:13
    |
 13 |     header: Header,
