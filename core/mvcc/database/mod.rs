@@ -405,6 +405,34 @@ impl LogRecord {
         }
     }
 
+    /// Differential-testing constructor for the aretta-books LogicalLog
+    /// conformance harness (H-1 / LWF organic catches). Produces a
+    /// payload-empty `LogRecord` whose buffer is just the pre-reserved
+    /// `LOG_HDR_SIZE + TX_HEADER_SIZE` framing prefix.
+    ///
+    /// The harness drives this record through
+    /// `LogicalLog::log_tx_deferred_offset` (H-1) or `LogicalLog::log_tx`
+    /// (LWF) with a `FaultInjectingIO` that fails the pwrite. With
+    /// `op_count = 0` and `has_header = false` the
+    /// `frame_and_pwrite_tx` path still backfills the 24-byte TX header,
+    /// computes a CRC over it, submits a pwrite, and sets
+    /// `pending_running_crc = Some(crc)` (deferred path) or advances
+    /// `offset` / `running_crc` (immediate path) BEFORE the faulted
+    /// completion fires — exactly the publish-before-fsync sites the
+    /// scenarios witness.
+    ///
+    /// Mirrors the existing `pub(crate) fn new` pattern; identical body.
+    /// Gated on the `differential-accessors` feature alongside the
+    /// `MvStore::diff_*` accessors so production builds never see it.
+    /// **NEVER use in production.**
+    ///
+    /// Catalog row: `verification/db/flavors/turso/ACCESSORS.md` (in the
+    /// aretta-books repo).
+    #[cfg(feature = "differential-accessors")]
+    pub fn new_for_test(tx_timestamp: TxID) -> Self {
+        Self::new(tx_timestamp)
+    }
+
     /// True iff no ops (row versions or header) have been appended.
     pub fn is_empty(&self) -> bool {
         let empty = self.op_count == 0;
