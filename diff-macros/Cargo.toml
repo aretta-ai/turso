@@ -1,0 +1,31 @@
+# Copyright 2026 the Turso authors. All rights reserved. MIT license.
+#
+# Proc-macro DSL for the `differential-accessors` feature. See
+# `verification/db/flavors/turso/ACCESSORS.md` in the aretta-books
+# repo and `docs-site/design/difftest-instrumentation-pattern.md`
+# for the catalog this macro generates.
+#
+# Phase 1 scope (deliberate): scalar field-projection via
+# `#[diff(... expose = [<name>: <Type>])]` on `Option<T>` fields only.
+# Wrapper-projection (rows 1-2) and parameterized lookup (row 5)
+# are deferred to Phase 2.
+
+[package]
+name = "diff_macros"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Differential-testing accessor codegen for the Turso fork's `differential-accessors` feature."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0.38"
+proc-macro2 = "1.0.93"
+syn = { version = "2.0.96", features = ["full"] }
+
+[dev-dependencies]
+trybuild = "1.0"
