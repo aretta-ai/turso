@@ -611,6 +611,21 @@ impl LogicalLog {
         self.header.as_ref().map(|h| h.version)
     }
 
+    /// Differential-testing accessor for the aretta-books LogicalLog
+    /// conformance harness (H-1 catch, default `discard_pending_log_write`
+    /// no-op leaves `pending_running_crc = Some(stale)` after a failed
+    /// deferred-offset write). Returns the current pending CRC slot so
+    /// the harness can detect the impl failing to clear it on the
+    /// abort path.
+    ///
+    /// **NEVER use in production.** Catalog row:
+    /// `verification/db/flavors/turso/ACCESSORS.md` (in the
+    /// aretta-books repo).
+    #[cfg(feature = "differential-accessors")]
+    pub fn diff_pending_running_crc(&self) -> Option<u32> {
+        self.pending_running_crc
+    }
+
     pub(crate) fn encryption_ctx(&self) -> Option<&EncryptionContext> {
         self.encryption_ctx.as_ref()
     }
