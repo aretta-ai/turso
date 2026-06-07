@@ -532,10 +532,24 @@ fn derive_initial_crc(salt: u64) -> u32 {
     crc32c::crc32c(&salt.to_le_bytes())
 }
 
+#[cfg_attr(
+    feature = "differential-accessors",
+    derive(diff_macros::DifferentialSubject)
+)]
 pub struct LogicalLog {
     pub file: Arc<dyn File>,
     io: Arc<dyn crate::IO>,
     pub offset: u64,
+    /// In-memory log header. Advanced past the durable header by
+    /// `write_header` *before* the on-disk pwrite completes, which is the
+    /// C-1 catch site (publish-before-fsync of the header upgrade at
+    /// `write_header` ~line 974). The aretta-books LogicalLog conformance
+    /// harness consumes the auto-generated `diff_header_version()`
+    /// accessor (ACCESSORS.md row 7) to observe this divergence.
+    #[cfg_attr(
+        feature = "differential-accessors",
+        diff(private, durable, expose = [version: u8])
+    )]
     header: Option<LogHeader>,
     /// Running CRC state for chained checksums. Seeded from the header salt;
     /// updated after each committed frame. The next frame's CRC is computed as
@@ -595,20 +609,6 @@ impl LogicalLog {
 
     pub(crate) fn header(&self) -> Option<&LogHeader> {
         self.header.as_ref()
-    }
-
-    /// Differential-testing accessor for the aretta-books LogicalLog
-    /// conformance harness (C-1 catch, publish-before-fsync of the
-    /// header upgrade). Returns the in-memory header version so the
-    /// harness can observe an advance past the durable header that
-    /// signals the bug at `write_header` line ~953.
-    ///
-    /// **NEVER use in production.** Catalog row:
-    /// `verification/db/flavors/turso/ACCESSORS.md` (in the
-    /// aretta-books repo).
-    #[cfg(feature = "differential-accessors")]
-    pub fn diff_header_version(&self) -> Option<u8> {
-        self.header.as_ref().map(|h| h.version)
     }
 
     /// Differential-testing accessor for the aretta-books LogicalLog

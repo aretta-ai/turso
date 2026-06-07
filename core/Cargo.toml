@@ -24,8 +24,11 @@ conn_raw_api = []
 # private `MvStore` internals (`txs`, `finalized_tx_states`, counter
 # values, commit_ts lookup) for differential testing against the Lean
 # model at `formal/ArettaBooks/Flavors/Turso/MvccModel/`. Never use in
-# production; only the verification crate enables this.
-differential-accessors = []
+# production; only the verification crate enables this. The
+# `dep:diff_macros` dep activates the `DifferentialSubject` derive
+# used to codegen `diff_*` accessors from `#[diff(...)]` field tags;
+# see `verification/db/flavors/turso/ACCESSORS.md` in aretta-books.
+differential-accessors = ["dep:diff_macros"]
 fs = ["turso_ext/vfs"]
 json = []
 uuid = ["dep:uuid"]
@@ -91,6 +94,7 @@ chrono = { workspace = true, default-features = false, features = ["clock"] }
 rand = { workspace = true }
 libm = "0.2"
 turso_macros = { workspace = true }
+diff_macros = { workspace = true, optional = true }
 miette = { workspace = true }
 strum = { workspace = true }
 parking_lot = { workspace = true, features = ["arc_lock"] }
