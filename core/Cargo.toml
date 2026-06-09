@@ -24,11 +24,13 @@ conn_raw_api = []
 # private `MvStore` internals (`txs`, `finalized_tx_states`, counter
 # values, commit_ts lookup) for differential testing against the Lean
 # model at `formal/ArettaBooks/Flavors/Turso/MvccModel/`. Never use in
-# production; only the verification crate enables this. The
-# `dep:diff_macros` dep activates the `DifferentialSubject` derive
-# used to codegen `diff_*` accessors from `#[diff(...)]` field tags;
-# see `verification/db/flavors/turso/ACCESSORS.md` in aretta-books.
-differential-accessors = ["dep:diff_macros"]
+# production; only the verification crate enables this. Codegen is
+# provided by `aristo::instrument` (the `Inspect` derive + `#[inspect(...)]`
+# field tags). The alias below routes Turso's `differential-accessors`
+# flag through to aristo's `aristo_instrument` convention flag. See
+# `verification/db/flavors/turso/ACCESSORS.md` in aretta-books and
+# `docs-site/design/aristo-instrument-handoff.md` for the migration plan.
+differential-accessors = ["dep:aristo", "aristo/aristo_instrument"]
 fs = ["turso_ext/vfs"]
 json = []
 uuid = ["dep:uuid"]
@@ -94,7 +96,11 @@ chrono = { workspace = true, default-features = false, features = ["clock"] }
 rand = { workspace = true }
 libm = "0.2"
 turso_macros = { workspace = true }
-diff_macros = { workspace = true, optional = true }
+# Aretta Books differential-testing instrumentation. Optional; activated
+# via the `differential-accessors` feature above. Provides the `Inspect`
+# derive + `#[inspect(...)]` field tags + `expose_pub` attribute +
+# `yield_point!` macro. Pinned at the `aristo::instrument` milestone.
+aristo = { version = "0.2", optional = true }
 miette = { workspace = true }
 strum = { workspace = true }
 parking_lot = { workspace = true, features = ["arc_lock"] }
