@@ -70,11 +70,14 @@ pub struct TxnSnapshot {
 pub type FinalStateSnapshot = TxnStateSnapshot;
 
 /// Project a live `Transaction` into a `TxnSnapshot` — used by the
-/// macro-generated `MvStore::diff_txs` accessor (ACCESSORS.md row 1).
+/// macro-generated `MvStore::inspect_txs` accessor (ACCESSORS.md row 1).
 /// Reads the atomic state slot with `Acquire`, mirrors `TransactionState`
 /// via `TxnStateSnapshot::from`, locks the write-set Mutex to copy
-/// `RowID`s out, and sorts the resulting list. The sort is part of the
-/// catalog contract — the Lean side performs the same canonicalization.
+/// `RowID`s out, and sorts the resulting list. The per-element sort is
+/// part of the projection contract — the Lean side performs the same
+/// canonicalization. The outer (by-key) sort is the consumer's
+/// responsibility post-migration; `aristo::instrument::Inspect` does
+/// not pre-sort.
 impl From<&Transaction> for TxnSnapshot {
     fn from(tx: &Transaction) -> Self {
         // `AtomicTransactionState::state` is `pub(crate)`; child-module
@@ -101,7 +104,7 @@ impl From<&Transaction> for TxnSnapshot {
 
 /// Project a borrowed `TransactionState` into a `FinalStateSnapshot`
 /// (= `TxnStateSnapshot`) — used by the macro-generated
-/// `MvStore::diff_finalized` accessor (ACCESSORS.md row 2). Trivial
+/// `MvStore::inspect_finalized` accessor (ACCESSORS.md row 2). Trivial
 /// Copy-deref into the existing `From<TransactionState>` impl.
 impl From<&TransactionState> for FinalStateSnapshot {
     fn from(s: &TransactionState) -> Self {
@@ -112,14 +115,14 @@ impl From<&TransactionState> for FinalStateSnapshot {
 impl<Clock: LogicalClock> MvStore<Clock> {
     /// Current value of `MvStore::tx_ids` (the next-tx-id allocator).
     /// Reads with `Acquire` to align with the allocator's `fetch_add`.
-    pub fn diff_tx_ids_value(&self) -> u64 {
+    pub fn inspect_tx_ids_value(&self) -> u64 {
         self.tx_ids.load(Ordering::Acquire)
     }
 
     /// Current value of `MvStore::version_id_counter` (the next-
     /// version-id allocator). Reads with `Acquire` for the same
-    /// reason as `diff_tx_ids_value`.
-    pub fn diff_version_id_counter_value(&self) -> u64 {
+    /// reason as `inspect_tx_ids_value`.
+    pub fn inspect_version_id_counter_value(&self) -> u64 {
         self.version_id_counter.load(Ordering::Acquire)
     }
 
@@ -144,7 +147,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
     /// To make the after-begin boundary line up, the Lean model's
     /// `Op.begin` handler maxes `nextTs` against `extBeginTs + 1` —
     /// see `Step.lean::Op.begin`.
-    pub fn diff_peek_next_ts(&self) -> u64 {
+    pub fn inspect_peek_next_ts(&self) -> u64 {
         self.last_committed_tx_ts.load(Ordering::Acquire) + 1
     }
 
@@ -154,7 +157,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
     /// the live `txs` table (where a committed tx may still sit for a
     /// short window before being moved). Returns `None` if the tx is
     /// not found, was aborted, or has not yet committed.
-    pub fn diff_commit_ts(&self, tx_id: TxID) -> Option<u64> {
+    pub fn inspect_commit_ts(&self, tx_id: TxID) -> Option<u64> {
         if let Some(entry) = self.finalized_tx_states.get(&tx_id) {
             if let TransactionState::Committed(ts) = *entry.value() {
                 return Some(ts);

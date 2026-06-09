@@ -64,10 +64,10 @@ pub use checkpoint_state_machine::{
 #[cfg(feature = "differential-accessors")]
 pub mod differential;
 
-// Re-import the snapshot types into scope so the `DifferentialSubject`
-// derive on `MvStore` can name them in `#[diff(snapshot = ...)]` tags
-// without qualifying through `self::differential::`. Both types live
-// in `differential.rs` (see ACCESSORS.md rows 1-2).
+// Re-import the snapshot types into scope so the `aristo::instrument::Inspect`
+// derive on `MvStore` can name them in `#[inspect(...)]` tags without
+// qualifying through `self::differential::`. Both types live in
+// `differential.rs` (see ACCESSORS.md rows 1-2).
 #[cfg(feature = "differential-accessors")]
 use self::differential::{FinalStateSnapshot, TxnSnapshot};
 
@@ -3366,7 +3366,7 @@ pub struct RowidAllocator {
 #[derive(Debug)]
 #[cfg_attr(
     feature = "differential-accessors",
-    derive(diff_macros::DifferentialSubject)
+    derive(aristo::instrument::Inspect)
 )]
 pub struct MvStore<Clock: LogicalClock> {
     pub rows: SkipMap<RowID, Arc<RwLock<Vec<RowVersion>>>>,
@@ -3387,23 +3387,23 @@ pub struct MvStore<Clock: LogicalClock> {
     /// table identifier into account.
     pub index_rows: SkipMap<MVTableId, SkipMap<Arc<SortableIndexKey>, RowVersions>>,
     /// Live transactions, projected by the conformance harness via the
-    /// macro-generated `diff_txs` accessor (ACCESSORS.md row 1). The
+    /// macro-generated `inspect_txs` accessor (ACCESSORS.md row 1). The
     /// `TxnSnapshot` is a lossy owned shadow defined in the
     /// `differential` submodule.
     #[cfg_attr(
         feature = "differential-accessors",
-        diff(private, snapshot = TxnSnapshot)
+        inspect(TxnSnapshot)
     )]
     txs: SkipMap<TxID, Transaction>,
     /// Final state for removed transactions. Readers may still race with stale TxID
     /// references in row versions after a transaction is removed from `txs`.
     /// Projected by the conformance harness via the macro-generated
-    /// `diff_finalized` accessor (ACCESSORS.md row 2) — note the field
+    /// `inspect_finalized` accessor (ACCESSORS.md row 2) — note the field
     /// name (`finalized_tx_states`) is shortened to `finalized` in the
-    /// accessor surface via `#[diff(name = "...")]`.
+    /// accessor surface via `#[inspect(..., name = "...")]`.
     #[cfg_attr(
         feature = "differential-accessors",
-        diff(private, snapshot = FinalStateSnapshot, name = "finalized")
+        inspect(FinalStateSnapshot, name = "finalized")
     )]
     finalized_tx_states: SkipMap<TxID, TransactionState>,
     tx_ids: AtomicU64,

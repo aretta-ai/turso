@@ -532,10 +532,6 @@ fn derive_initial_crc(salt: u64) -> u32 {
     crc32c::crc32c(&salt.to_le_bytes())
 }
 
-#[cfg_attr(
-    feature = "differential-accessors",
-    derive(diff_macros::DifferentialSubject)
-)]
 pub struct LogicalLog {
     pub file: Arc<dyn File>,
     io: Arc<dyn crate::IO>,
@@ -544,12 +540,13 @@ pub struct LogicalLog {
     /// `write_header` *before* the on-disk pwrite completes, which is the
     /// C-1 catch site (publish-before-fsync of the header upgrade at
     /// `write_header` ~line 974). The aretta-books LogicalLog conformance
-    /// harness consumes the auto-generated `diff_header_version()`
+    /// harness consumes the hand-written `inspect_header_version()`
     /// accessor (ACCESSORS.md row 7) to observe this divergence.
-    #[cfg_attr(
-        feature = "differential-accessors",
-        diff(private, durable, expose = [version: u8])
-    )]
+    /// Pre-migration this field carried a `#[diff(expose = ...)]` tag
+    /// that `diff_macros` Phase 1 codegen lifted into an auto-generated
+    /// accessor; the migration to `aristo::instrument` (the published
+    /// macro surface) drops the scalar-projection sub-shape, so the
+    /// accessor is now hand-written below.
     header: Option<LogHeader>,
     /// Running CRC state for chained checksums. Seeded from the header salt;
     /// updated after each committed frame. The next frame's CRC is computed as
@@ -612,17 +609,34 @@ impl LogicalLog {
     }
 
     /// Differential-testing accessor for the aretta-books LogicalLog
+    /// conformance harness — projects `self.header.as_ref().map(|h| h.version)`.
+    /// Used by the C-1 catch (publish-before-fsync of the header upgrade
+    /// at `write_header` line ~974). Lean predicts `None` (or the old
+    /// version) when the pwrite is faulted before fsync; impl returns
+    /// `Some(new_version)` under the bug.
+    ///
+    /// Pre-migration this was macro-derived via `diff_macros` Phase 1.
+    /// `aristo::instrument` dropped the scalar-projection sub-shape, so
+    /// this is now hand-written. ACCESSORS.md row 7.
+    ///
+    /// **NEVER use in production.**
+    #[cfg(feature = "differential-accessors")]
+    pub fn inspect_header_version(&self) -> Option<u8> {
+        self.header.as_ref().map(|h| h.version)
+    }
+
+    /// Differential-testing accessor for the aretta-books LogicalLog
     /// conformance harness (H-1 catch, default `discard_pending_log_write`
     /// no-op leaves `pending_running_crc = Some(stale)` after a failed
     /// deferred-offset write). Returns the current pending CRC slot so
     /// the harness can detect the impl failing to clear it on the
     /// abort path.
     ///
-    /// **NEVER use in production.** Catalog row:
+    /// **NEVER use in production.** Catalog row 8:
     /// `verification/db/flavors/turso/ACCESSORS.md` (in the
     /// aretta-books repo).
     #[cfg(feature = "differential-accessors")]
-    pub fn diff_pending_running_crc(&self) -> Option<u32> {
+    pub fn inspect_pending_running_crc(&self) -> Option<u32> {
         self.pending_running_crc
     }
 
