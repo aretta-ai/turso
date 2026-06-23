@@ -1,9 +1,11 @@
 use crate::turso_debug_assert;
 use branches::{mark_unlikely, unlikely};
 use either::Either;
-use turso_ext::{AggCtx, FinalizeFunction, StepFunction};
+use turso_ext::{AggCtx, ContextDestructor, FinalizeFunction, StepFunction, ValueDestructor};
 use turso_parser::ast::SortOrder;
 
+use crate::alloc::vec;
+use crate::alloc::*;
 use crate::error::LimboError;
 use crate::ext::{ExtValue, ExtValueType};
 use crate::index_method::IndexMethodCursor;
@@ -132,12 +134,12 @@ impl<'a> Deref for TextRef<'a> {
 }
 
 pub trait Extendable<T> {
-    fn do_extend(&mut self, other: &T);
+    fn do_extend(&mut self, other: &T) -> Result<()>;
 }
 
 impl<T: AnyText> Extendable<T> for Text {
     #[inline(always)]
-    fn do_extend(&mut self, other: &T) {
+    fn do_extend(&mut self, other: &T) -> Result<()> {
         let other_str = other.as_ref();
         match &mut self.value {
             Cow::Owned(s) => {
@@ -162,12 +164,13 @@ impl<T: AnyText> Extendable<T> for Text {
             }
         }
         self.subtype = other.subtype();
+        Ok(())
     }
 }
 
 impl<T: AnyBlob> Extendable<T> for Vec<u8> {
     #[inline(always)]
-    fn do_extend(&mut self, other: &T) {
+    fn do_extend(&mut self, other: &T) -> Result<()> {
         let other_slice = other.as_slice();
         let needed = other_slice.len();
         if self.capacity() >= needed {
@@ -183,8 +186,11 @@ impl<T: AnyBlob> Extendable<T> for Vec<u8> {
             }
         } else {
             self.clear();
+            // Reserve mores space to extend the slice
+            self.try_reserve(self.len().abs_diff(needed))?;
             self.extend_from_slice(other_slice);
         }
+        Ok(())
     }
 }
 
@@ -488,10 +494,13 @@ impl Value {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExternalAggState {
+    pub context: usize,
     pub state: *mut AggCtx,
     pub argc: usize,
     pub step_fn: StepFunction,
     pub finalize_fn: FinalizeFunction,
+    pub aggregate_destructor: Option<ContextDestructor>,
+    pub value_destructor: Option<ValueDestructor>,
 }
 
 /// Please use Display trait for all limbo output so we have single origin of truth
@@ -527,8 +536,8 @@ impl Value {
         }
     }
 
-    pub fn from_ffi(v: ExtValue) -> Result<Self> {
-        let res = match v.value_type() {
+    pub(crate) fn from_ffi_ref(v: &ExtValue) -> Result<Self> {
+        match v.value_type() {
             ExtValueType::Null => Ok(Value::Null),
             ExtValueType::Integer => {
                 let Some(int) = v.to_integer() else {
@@ -567,7 +576,11 @@ impl Value {
                     (code, None) => Err(LimboError::ExtensionError(code.to_string())),
                 }
             }
-        };
+        }
+    }
+
+    pub fn from_ffi(v: ExtValue) -> Result<Self> {
+        let res = Self::from_ffi_ref(&v);
         unsafe { v.__free_internal_type() };
         res
     }
@@ -594,7 +607,7 @@ macro_rules! impl_int_from_value {
                 match val {
                     Value::Null => Err(LimboError::NullValue),
                     Value::Numeric(Numeric::Integer(i)) => Ok($cast(i)),
-                    _ => unreachable!("invalid value type"),
+                    _ => Err(LimboError::InvalidColumnType),
                 }
             }
         }
@@ -613,7 +626,7 @@ impl FromValue for f64 {
         match val {
             Value::Null => Err(LimboError::NullValue),
             Value::Numeric(Numeric::Float(f)) => Ok(f64::from(f)),
-            _ => unreachable!("invalid value type"),
+            _ => Err(LimboError::InvalidColumnType),
         }
     }
 }
@@ -624,7 +637,7 @@ impl FromValue for Vec<u8> {
         match val {
             Value::Null => Err(LimboError::NullValue),
             Value::Blob(blob) => Ok(blob),
-            _ => unreachable!("invalid value type"),
+            _ => Err(LimboError::InvalidColumnType),
         }
     }
 }
@@ -635,7 +648,7 @@ impl<const N: usize> FromValue for [u8; N] {
         match val {
             Value::Null => Err(LimboError::NullValue),
             Value::Blob(blob) => blob.try_into().map_err(|_| LimboError::InvalidBlobSize(N)),
-            _ => unreachable!("invalid value type"),
+            _ => Err(LimboError::InvalidColumnType),
         }
     }
 }
@@ -646,7 +659,7 @@ impl FromValue for String {
         match val {
             Value::Null => Err(LimboError::NullValue),
             Value::Text(s) => Ok(s.to_string()),
-            _ => unreachable!("invalid value type"),
+            _ => Err(LimboError::InvalidColumnType),
         }
     }
 }
@@ -661,7 +674,7 @@ impl FromValue for bool {
                 1 => Ok(true),
                 _ => Err(LimboError::InvalidColumnType),
             },
-            _ => unreachable!("invalid value type"),
+            _ => Err(LimboError::InvalidColumnType),
         }
     }
 }
@@ -718,8 +731,18 @@ pub enum AggContext {
 impl AggContext {
     pub fn compute_external(&self) -> Result<Value> {
         if let Self::External(ext_state) = self {
-            let final_value = unsafe { (ext_state.finalize_fn)(ext_state.state) };
-            Value::from_ffi(final_value)
+            let mut final_value =
+                unsafe { (ext_state.finalize_fn)(ext_state.context, ext_state.state) };
+            let value = Value::from_ffi_ref(&final_value);
+            if let Some(value_destructor) = ext_state.value_destructor {
+                unsafe { value_destructor(&mut final_value) };
+            } else {
+                unsafe { final_value.__free_internal_type() };
+            }
+            if let Some(aggregate_destructor) = ext_state.aggregate_destructor {
+                unsafe { aggregate_destructor(ext_state.state as usize) };
+            }
+            value
         } else {
             panic!("AggContext::compute_external() expected External, found {self:?}");
         }
@@ -1065,16 +1088,13 @@ mod immutable_record {
 
     fn values(payload: &[u8]) -> Result<Vec<ValueRef<'_>>> {
         let iter = iter(payload)?;
-        let mut values = Vec::with_capacity(iter.size_hint().0);
-        for value in iter {
-            values.push(value?);
-        }
+        let values = iter.try_collect::<Result<_>>()??;
         Ok(values)
     }
 
     fn values_range(payload: &[u8], range: std::ops::Range<usize>) -> Result<Vec<ValueRef<'_>>> {
         let mut iter = iter(payload)?;
-        let mut values = Vec::with_capacity(range.end - range.start);
+        let mut values = Vec::try_with_capacity_ext(range.end - range.start)?;
         if let Some(value) = iter.nth(range.start) {
             values.push(value?);
         } else {
@@ -1140,16 +1160,15 @@ mod immutable_record {
 
     fn values_owned(payload: &[u8]) -> Result<Vec<Value>> {
         let iter = iter(payload).expect("Failed to create payload iterator");
-        let mut values = Vec::with_capacity(iter.size_hint().0);
-        for value in iter {
-            values.push(value?.to_owned());
-        }
+        let values = iter
+            .map(|v| Ok::<_, LimboError>(v?.to_owned()))
+            .try_collect::<Result<_>>()??;
         Ok(values)
     }
 
     fn values_owned_range(payload: &[u8], range: std::ops::Range<usize>) -> Result<Vec<Value>> {
         let mut iter = iter(payload).expect("Failed to create payload iterator");
-        let mut values = Vec::with_capacity(range.end - range.start);
+        let mut values = Vec::try_with_capacity_ext(range.end - range.start)?;
         if let Some(value) = iter.nth(range.start) {
             values.push(value?.to_owned());
         } else {
@@ -1364,10 +1383,10 @@ mod immutable_record {
     }
 
     impl ImmutableRecord {
-        pub fn new(payload_capacity: usize) -> Self {
-            Self {
-                payload: Value::Blob(Vec::with_capacity(payload_capacity)),
-            }
+        pub fn new(payload_capacity: usize) -> Result<Self> {
+            Ok(Self {
+                payload: Value::Blob(Vec::try_with_capacity_ext(payload_capacity)?),
+            })
         }
 
         pub const fn from_bin_record(payload: Vec<u8>) -> Self {
@@ -1387,15 +1406,15 @@ mod immutable_record {
             // (without copying the data itself)
             registers: impl IntoIterator<Item = &'a Register, IntoIter = I>,
             len: usize,
-        ) -> Self {
+        ) -> Result<Self> {
             Self::from_values(registers.into_iter().map(|x| x.get_value()), len)
         }
 
         pub fn from_values<'a>(
             values: impl IntoIterator<Item = impl AsValueRef + 'a> + Clone,
             len: usize,
-        ) -> Self {
-            let mut serials = Vec::with_capacity(len);
+        ) -> Result<Self> {
+            let mut serials = Vec::try_with_capacity_ext(len)?;
             let mut size_header = 0;
             let mut size_values = 0;
 
@@ -1415,8 +1434,7 @@ mod immutable_record {
             let header_size = Record::calc_header_size(size_header);
 
             // 1. write header size
-            let mut buf = Vec::new();
-            buf.reserve_exact(header_size + size_values);
+            let mut buf = Vec::try_with_capacity_ext(header_size + size_values)?;
             assert_eq!(buf.capacity(), header_size + size_values);
             let n = write_varint(&mut serial_type_buf, header_size as u64);
 
@@ -1469,9 +1487,9 @@ mod immutable_record {
             }
 
             writer.assert_finish_capacity();
-            Self {
+            Ok(Self {
                 payload: Value::Blob(buf),
-            }
+            })
         }
 
         #[inline]
@@ -1504,8 +1522,11 @@ mod immutable_record {
         }
 
         #[inline]
-        pub fn start_serialization(&mut self, payload: &[u8]) {
-            self.as_blob_mut().extend_from_slice(payload);
+        pub fn start_serialization(&mut self, payload: &[u8]) -> Result<()> {
+            let blob = self.as_blob_mut();
+            blob.try_reserve(payload.len())?;
+            blob.extend_from_slice(payload);
+            Ok(())
         }
 
         #[inline]
@@ -1997,31 +2018,30 @@ impl Default for IndexInfo {
 }
 
 impl IndexInfo {
-    pub fn new_from_index(index: &Index) -> Self {
-        Self {
-            key_info: {
-                let mut key_info: Vec<KeyInfo> = index
-                    .columns
-                    .iter()
-                    .map(|c| KeyInfo {
-                        sort_order: c.order,
-                        collation: c.collation.unwrap_or_default(),
-                        nulls_order: None,
-                    })
-                    .collect();
-                if index.has_rowid {
-                    key_info.push(KeyInfo {
-                        sort_order: SortOrder::Asc,
-                        collation: CollationSeq::Binary,
-                        nulls_order: None,
-                    });
-                }
-                key_info
-            },
+    pub fn new_from_index(index: &Index) -> Result<Self> {
+        let mut key_info: Vec<KeyInfo> = index
+            .columns
+            .iter()
+            .map(|c| KeyInfo {
+                sort_order: c.order,
+                collation: c.collation.unwrap_or_default(),
+                nulls_order: None,
+            })
+            .try_collect()?;
+        if index.has_rowid {
+            key_info.try_push(KeyInfo {
+                sort_order: SortOrder::Asc,
+                collation: CollationSeq::Binary,
+                nulls_order: None,
+            })?;
+        }
+        let this = Self {
+            key_info,
             has_rowid: index.has_rowid,
             num_cols: index.columns.len() + (index.has_rowid as usize),
             is_unique: index.unique,
-        }
+        };
+        Ok(this)
     }
 }
 
@@ -3196,6 +3216,7 @@ impl WalFrameInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::alloc::vec;
     use crate::translate::collate::CollationSeq;
 
     #[test]
@@ -3324,7 +3345,7 @@ mod tests {
 
     fn create_record(values: Vec<Value>) -> ImmutableRecord {
         let registers: Vec<Register> = values.into_iter().map(Register::Value).collect();
-        ImmutableRecord::from_registers(&registers, registers.len())
+        ImmutableRecord::from_registers(&registers, registers.len()).unwrap()
     }
 
     #[test]
@@ -4185,7 +4206,7 @@ mod tests {
         for num_values in 1..=10 {
             let values: Vec<Value> = (0..num_values).map(|i| Value::from_i64(i as i64)).collect();
 
-            let record = ImmutableRecord::from_values(&values, values.len());
+            let record = ImmutableRecord::from_values(&values, values.len()).unwrap();
             let cnt = record.column_count();
             assert_eq!(
                 cnt, num_values,

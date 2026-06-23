@@ -286,10 +286,10 @@ impl Register {
     /// Set the value of the register to a Text,
     /// reusing Register::Value(Value::Text(_)) buffer if possible.
     #[inline]
-    pub fn set_text(&mut self, val: Text) {
+    pub fn set_text(&mut self, val: Text) -> Result<()> {
         match self {
             Register::Value(Value::Text(existing)) => {
-                existing.do_extend(&val);
+                existing.do_extend(&val)?;
             }
             Register::Value(other_value_kind) => {
                 *other_value_kind = Value::Text(val);
@@ -298,15 +298,16 @@ impl Register {
                 *self = Register::Value(Value::Text(val));
             }
         }
+        Ok(())
     }
 
     /// Set the value of the register to a blob,
     /// reusing Register::Value(Value::Blob(_)) buffer if possible.
     #[inline]
-    pub fn set_blob(&mut self, val: Vec<u8>) {
+    pub fn set_blob(&mut self, val: Vec<u8>) -> Result<()> {
         match self {
             Register::Value(Value::Blob(existing)) => {
-                existing.do_extend(&val);
+                existing.do_extend(&val)?;
             }
             Register::Value(other_value_kind) => {
                 *other_value_kind = Value::Blob(val);
@@ -315,6 +316,7 @@ impl Register {
                 *self = Register::Value(Value::Blob(val));
             }
         }
+        Ok(())
     }
 
     // Set the value of the register to NULL,
@@ -789,7 +791,7 @@ impl ProgramState {
         matches!(self.execution_state, ProgramExecutionState::Interrupting)
     }
 
-    pub fn bind_at(&mut self, index: NonZero<usize>, value: Value) {
+    pub fn bind_at(&mut self, index: NonZero<usize>, value: Value) -> Result<()> {
         let i = index.get() - 1;
         if i >= self.parameters.len() {
             self.parameters.resize(i + 1, Value::Null);
@@ -803,10 +805,11 @@ impl ProgramState {
             (Value::Numeric(Numeric::Float(existing)), Value::Numeric(Numeric::Float(new))) => {
                 *existing = new
             }
-            (Value::Text(existing), Value::Text(new)) => existing.do_extend(&new),
-            (Value::Blob(existing), Value::Blob(new)) => existing.do_extend(&new),
+            (Value::Text(existing), Value::Text(new)) => existing.do_extend(&new)?,
+            (Value::Blob(existing), Value::Blob(new)) => existing.do_extend(&new)?,
             (slot, value) => *slot = value,
         }
+        Ok(())
     }
 
     pub fn clear_bindings(&mut self) {
@@ -1230,8 +1233,24 @@ macro_rules! get_cursor {
 pub struct ExplainState {
     /// Subprograms queued for explain output, processed after the parent program finishes.
     pending: std::collections::VecDeque<Arc<PreparedProgram>>,
+    /// Prepared subprograms that have already been queued for explain output.
+    ///
+    /// Recursive foreign-key action programs can contain a `Program` instruction
+    /// that calls the same prepared program again. Without this set, EXPLAIN
+    /// keeps printing the same subprogram forever.
+    queued_subprograms: std::collections::HashSet<usize>,
     /// The subprogram currently being explained, if any.
     current: Option<Arc<PreparedProgram>>,
+}
+
+impl ExplainState {
+    /// Queue a subprogram for EXPLAIN output if this statement has not queued it before.
+    fn queue_subprogram_once(&mut self, subprogram: Arc<PreparedProgram>) {
+        let subprogram_id = Arc::as_ptr(&subprogram) as usize;
+        if self.queued_subprograms.insert(subprogram_id) {
+            self.pending.push_back(subprogram);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1445,10 +1464,11 @@ impl Program {
         let (row, subprogram) = if let Some(ref current) = explain_state.current {
             let (insn, _) = &current.insns[pc];
             let sub = if let Insn::Program {
-                program: prepared, ..
+                program: subprogram,
+                ..
             } = insn
             {
-                Some(prepared.clone())
+                Some(subprogram.prepared_program()?)
             } else {
                 None
             };
@@ -1461,10 +1481,11 @@ impl Program {
         } else {
             let (insn, _) = &self.insns[pc];
             let sub = if let Insn::Program {
-                program: prepared, ..
+                program: subprogram,
+                ..
             } = insn
             {
-                Some(prepared.clone())
+                Some(subprogram.prepared_program()?)
             } else {
                 None
             };
@@ -1476,7 +1497,7 @@ impl Program {
             (insn_to_row_with_comment(self, insn, comment), sub)
         };
         if let Some(sub) = subprogram {
-            explain_state.pending.push_back(sub);
+            explain_state.queue_subprogram_once(sub);
         }
         let (opcode, p1, p2, p3, p4, p5, comment) = row;
 
@@ -2518,7 +2539,7 @@ pub(crate) fn make_record(
     registers: &[Register],
     start_reg: &usize,
     count: &usize,
-) -> ImmutableRecord {
+) -> Result<ImmutableRecord> {
     let regs = &registers[*start_reg..*start_reg + *count];
     ImmutableRecord::from_registers(regs, regs.len())
 }
@@ -2825,10 +2846,14 @@ impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
                 let blob_data = &data[..content_size];
                 match dest {
                     Register::Value(Value::Blob(existing_blob)) => {
-                        existing_blob.do_extend(&blob_data);
+                        if let Err(err) = existing_blob.do_extend(&blob_data) {
+                            return Some(Err(err));
+                        }
                     }
                     _ => {
-                        dest.set_blob(blob_data.to_vec());
+                        if let Err(err) = dest.set_blob(blob_data.to_vec()) {
+                            return Some(Err(err));
+                        }
                     }
                 }
             }
@@ -2855,10 +2880,14 @@ impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
                 };
                 match dest {
                     Register::Value(Value::Text(existing_text)) => {
-                        existing_text.do_extend(&text_str);
+                        if let Err(err) = existing_text.do_extend(&text_str) {
+                            return Some(Err(err));
+                        }
                     }
                     _ => {
-                        dest.set_text(Text::new(text_str.to_string()));
+                        if let Err(err) = dest.set_text(Text::new(text_str.to_string())) {
+                            return Some(Err(err));
+                        }
                     }
                 }
             }
