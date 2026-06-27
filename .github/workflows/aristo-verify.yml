@@ -3,29 +3,30 @@
 # builds, and runs the conformance harness on Aretta's infrastructure and
 # reports back, so it needs an Aretta token.
 #
-# Triggers: manual (workflow_dispatch) + nightly. NOT on pull_request — verify
-# requires the checked-out commit to exist on origin, and a PR's synthetic
-# merge-commit HEAD is not pushed.
+# Triggers: push to aristo-verifiable (the instrumented SUT branch) + manual +
+# nightly. NOT on pull_request — verify requires the checked-out commit to exist
+# on origin, and a PR's synthetic merge-commit HEAD is not pushed.
 #
-# Setup: add the repo secret ARETTA_TOKEN (value = your arta_* token; mint one
-# with `aristo auth login`). See .github/workflows/aristo.yml for the lite gate.
+# Target: turso's own per-repo conductor instance (aretta-ai-turso.aretta.ai),
+# authenticated with the ARETTA_TURSO_TOKEN secret. The server-side instance
+# decides the books edition / flavor; this client only sends (repo, commit).
 name: aristo verify
 on:
   workflow_dispatch:
+  push:
+    branches: [aristo-verifiable]
   schedule:
     - cron: '0 7 * * *' # nightly at 07:00 UTC
 jobs:
   verify:
     runs-on: ubuntu-latest
     env:
-      # Target the dev environment (value managed via the ARETTA_API_URL repo
-      # Variable) until the verify infra ships to prod. Remove this / clear the
-      # Variable to fall back to the default (prod) server. The job-level env
-      # propagates into the composite action's verify step.
-      ARETTA_API_URL: ${{ vars.ARETTA_API_URL }}
+      # Per-repo conductor instance for turso. The job-level env propagates into
+      # the composite action's verify step.
+      ARETTA_API_URL: https://aretta-ai-turso.aretta.ai
     steps:
       - uses: actions/checkout@v4
       - uses: aretta-ai/aristo-action@v1
         with:
           checks: verify
-          aretta-token: ${{ secrets.ARETTA_TOKEN }}
+          aretta-token: ${{ secrets.ARETTA_TURSO_TOKEN }}
