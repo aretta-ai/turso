@@ -3199,6 +3199,55 @@ impl Pager {
         Ok(page_cache.resize(capacity))
     }
 
+    /// Differential-testing accessor: hand back a clone of the shared
+    /// page-cache handle so a conformance harness can read the `inspect_*`
+    /// accessors on the very `PageCache` that `add_dirty` mutates. Exposed
+    /// publicly through `expose_pub` as `inspect_page_cache_handle`.
+    #[cfg(feature = "differential-accessors")]
+    #[aristo::instrument::expose_pub(as = "inspect_page_cache_handle")]
+    fn page_cache_handle(&self) -> crate::sync::Arc<crate::sync::RwLock<PageCache>> {
+        self.page_cache.clone()
+    }
+
+    /// Differential-testing constructor: builds a minimal in-memory
+    /// `Pager` mirroring the test-only `test_pager_setup` (MemoryIO +
+    /// DatabaseFile + BufferPool + page-1 seed; WAL omitted — see body),
+    /// using items (`default_page1`, `ArcSwapOption`, `Mutex`) that are
+    /// in-scope here but not reachable from an external conformance crate.
+    /// Exposed
+    /// publicly through `expose_pub` as `inspect_new_test_pager` so the
+    /// page-cache-conformance harness can drive the real `add_dirty` path.
+    #[cfg(feature = "differential-accessors")]
+    #[aristo::instrument::expose_pub(as = "inspect_new_test_pager")]
+    fn new_for_differential_test() -> Self {
+        use crate::io::{MemoryIO, OpenFlags, IO};
+        use crate::storage::database::DatabaseFile;
+
+        let page_size: u32 = 4096;
+        let pages: u32 = 64;
+        let io: Arc<dyn IO> = Arc::new(MemoryIO::new());
+        let db_file: Arc<dyn DatabaseStorage> = Arc::new(DatabaseFile::new(
+            io.open_file("test.db", OpenFlags::Create, true).unwrap(),
+        ));
+        let buffer_pool = BufferPool::begin_init(&io, (pages * page_size) as usize);
+        // No WAL needed: the B1 path (`add_dirty` -> dirty-set + cache
+        // notify + `set_dirty`) never touches the WAL, and the non-test
+        // `WalFileShared` constructor is `#[cfg(test)]`-gated. Page 1 is
+        // seeded so the pager is well-formed; the conformance scenario
+        // operates on page id 2.
+        let init_page_1 = Arc::new(ArcSwapOption::new(Some(default_page1(None))));
+        Pager::new(
+            db_file,
+            None,
+            io,
+            PageCache::new(pages as usize),
+            buffer_pool,
+            Arc::new(Mutex::new(())),
+            init_page_1,
+        )
+        .unwrap()
+    }
+
     pub fn add_dirty(&self, page: &Page) -> Result<()> {
         turso_assert!(
             page.is_loaded(),

@@ -96,6 +96,10 @@ pub enum SpillResult {
 /// Sweep order follows next: tail (LRU) -> head (MRU) -> .. -> tail
 /// New pages are inserted after the clock hand in the `next` direction,
 /// which places them at head (MRU) (i.e. `tail.next` is the head).
+#[cfg_attr(
+    feature = "differential-accessors",
+    derive(aristo::instrument::Inspect)
+)]
 pub struct PageCache {
     /// Capacity in pages
     capacity: usize,
@@ -109,6 +113,7 @@ pub struct PageCache {
     spill_threshold: usize,
     spill_enabled: bool,
     /// Conservative estimation of pages that are evictable based on dirty/spilled state.
+    #[cfg_attr(feature = "differential-accessors", inspect)]
     evictable_count: usize,
 }
 
@@ -447,6 +452,10 @@ impl PageCache {
 
     #[inline]
     /// Count pages that can be evicted without spilling.
+    #[cfg_attr(
+        feature = "differential-accessors",
+        aristo::instrument::expose_pub(as = "inspect_count_evictable_pages")
+    )]
     fn count_evictable_pages(&self) -> usize {
         self.map
             .values()
@@ -784,6 +793,11 @@ impl PageCache {
         self.map.keys().copied().collect()
     }
 
+    // The `differential-accessors` feature widens this module to `pub`
+    // (see core/storage/mod.rs), which promotes `len` to true public API and
+    // trips `clippy::len_without_is_empty`. The cache has no `is_empty`
+    // caller, so allow the lint rather than grow an unused method.
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.map.len()
     }
@@ -828,6 +842,59 @@ impl PageCache {
         } else {
             assert_eq!(map_len, 0, "clock hand null but map not empty");
         }
+    }
+
+    /// Non-panicking twin of `verify_cache_integrity`: returns whether
+    /// every cache invariant holds instead of asserting. Used by the
+    /// differential-testing harness, which needs a boolean it can
+    /// compare against the model rather than a panic. Exposed publicly
+    /// through `expose_pub` as `inspect_cache_integrity_ok`.
+    #[cfg(feature = "differential-accessors")]
+    #[aristo::instrument::expose_pub(as = "inspect_cache_integrity_ok")]
+    fn cache_integrity_ok(&self) -> bool {
+        use rustc_hash::FxHashSet as HashSet;
+
+        let map_len = self.map.len();
+
+        // Walk the queue: count entries and collect distinct keys.
+        let mut queue_len = 0;
+        let mut cursor = self.queue.front();
+        let mut seen_keys = HashSet::default();
+        while let Some(entry) = cursor.get() {
+            queue_len += 1;
+            seen_keys.insert(entry.key);
+            cursor.move_next();
+        }
+
+        // map.len() == queue length.
+        if map_len != queue_len {
+            return false;
+        }
+        // map.len() == count of distinct keys seen in queue (no duplicates).
+        if map_len != seen_keys.len() {
+            return false;
+        }
+        // Every map key present in the queue.
+        for &key in self.map.keys() {
+            if !seen_keys.contains(&key) {
+                return false;
+            }
+        }
+        // clock_hand consistency: non-null => map non-empty AND hand key
+        // in map; null => map empty.
+        if !self.clock_hand.is_null() {
+            if map_len == 0 {
+                return false;
+            }
+            let hand_key = unsafe { (*self.clock_hand).key };
+            if !self.map.contains_key(&hand_key) {
+                return false;
+            }
+        } else if map_len != 0 {
+            return false;
+        }
+
+        true
     }
 
     #[cfg(test)]
