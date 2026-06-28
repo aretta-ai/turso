@@ -1615,7 +1615,12 @@ fn reload_physical_schema_for_mvcc_vacuum(
 ///
 /// `cleanup_state` independently tracks which resources the opcode has acquired so
 /// that cleanup can roll back correctly
-#[aristo::intent("VACUUM preserves the database's logical content\n", id = "aristos:vacuum_preserves_logical_content", verify = "full", parent = "storage_compaction_correctness")]
+#[aristo::intent(
+    "VACUUM preserves the database's logical content\n",
+    id = "aristos:vacuum_preserves_logical_content",
+    verify = "full",
+    parent = "storage_compaction_correctness"
+)]
 #[aristo::intent("VACUUM is atomic under crash: recovery yields either the pre-VACUUM state or the post-VACUUM state, never an intermediate\n", id = "aristos:vacuum_atomic_under_crash", verify = "full", parent = "storage_compaction_correctness")]
 fn vacuum_in_place_step(
     connection: &Arc<Connection>,

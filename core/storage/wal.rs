@@ -3149,7 +3149,11 @@ impl Wal for WalFile {
 
     /// Begin a write transaction
     #[instrument(skip_all, level = Level::DEBUG)]
-    #[aristo::intent("At most one write transaction is active at any time.", id = "single_writer_serialization", verify = "neural")]
+    #[aristo::intent(
+        "At most one write transaction is active at any time.",
+        id = "single_writer_serialization",
+        verify = "neural"
+    )]
     fn begin_write_tx(&self, allowed_auto_actions: WalAutoActions) -> Result<()> {
         tracing::debug!("begin_write_tx");
         let begin_write_result: Result<()> = {
@@ -3250,7 +3254,12 @@ impl Wal for WalFile {
 
     /// Find the latest frame containing a page.
     #[instrument(skip_all, level = Level::DEBUG)]
-    #[aristo::intent("find_frame never reads outside the live frame range [nbackfills, max_frame]\n", id = "aristos:wal_find_frame_range_invariant", verify = "full", parent = "wal_protocol_correctness")]
+    #[aristo::intent(
+        "find_frame never reads outside the live frame range [nbackfills, max_frame]\n",
+        id = "aristos:wal_find_frame_range_invariant",
+        verify = "full",
+        parent = "wal_protocol_correctness"
+    )]
     fn find_frame(&self, page_id: u64, frame_watermark: Option<u64>) -> Result<Option<u64>> {
         #[cfg(not(feature = "conn_raw_api"))]
         turso_assert!(
@@ -4004,7 +4013,12 @@ impl Wal for WalFile {
         }
     }
 
-    #[aristo::intent("The WAL initialized flag is set true only after a successful sync of the wal-header\n", id = "aristos:wal_initialized_reflects_sync_outcome", verify = "full", parent = "wal_protocol_correctness")]
+    #[aristo::intent(
+        "The WAL initialized flag is set true only after a successful sync of the wal-header\n",
+        id = "aristos:wal_initialized_reflects_sync_outcome",
+        verify = "full",
+        parent = "wal_protocol_correctness"
+    )]
     fn prepare_wal_finish(&self, sync_type: FileSyncType) -> Result<Completion> {
         let file = self.coordination.wal_file()?;
         let coordination = self.coordination.clone();
@@ -4470,7 +4484,12 @@ impl WalFile {
         Ok(())
     }
 
-    #[aristo::intent("A checkpoint failure must not leak frames into the main database file\n", id = "aristos:wal_checkpoint_error_no_db_leak", verify = "full", parent = "wal_protocol_correctness")]
+    #[aristo::intent(
+        "A checkpoint failure must not leak frames into the main database file\n",
+        id = "aristos:wal_checkpoint_error_no_db_leak",
+        verify = "full",
+        parent = "wal_protocol_correctness"
+    )]
     fn checkpoint_inner(
         &self,
         pager: &Pager,
