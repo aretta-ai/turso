@@ -227,18 +227,18 @@ checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
 name = "aristo"
-version = "0.2.9"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d781218a2d6e4cb88c753206b53da32966ba00a8b7adbb10174c25ac1b0a2c66"
+checksum = "aa4d39146b23b6847e2b0c492527e3cd00897c10d24ec395a03a949ee74af03f"
 dependencies = [
  "aristo-macros",
 ]
 
 [[package]]
 name = "aristo-macros"
-version = "0.2.9"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e86563c54ce34fcaa9df4f8d9dd4100138c5783114a02bc7c0f4dd097c6d867"
+checksum = "e04c0ba20c5781a92b9e30169fe4da44f3206a2dd8a54140ba81ad3cf0fd8bcd"
 dependencies = [
  "proc-macro2",
  "quote",

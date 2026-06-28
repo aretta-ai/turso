@@ -23,6 +23,7 @@
 use crate::mvcc::clock::LogicalClock;
 use crate::mvcc::database::{MvStore, RowID, Transaction, TransactionState, TxID};
 use crate::sync::atomic::Ordering;
+use crossbeam_skiplist::SkipMap;
 
 /// Owned snapshot of a `TransactionState`. Mirrors the private enum.
 /// `Preparing` and `Terminated` are included for completeness — the
@@ -112,6 +113,29 @@ impl From<&TransactionState> for FinalStateSnapshot {
     }
 }
 
+/// Projector for the macro-generated `MvStore::inspect_txs` accessor.
+/// Walks the live `txs` `SkipMap` and projects each live `Transaction`
+/// into an owned `TxnSnapshot` via the `From<&Transaction>` impl above.
+/// The outer (by-key) order follows `SkipMap`'s sorted iteration; the
+/// consumer is responsible for any further canonicalization.
+pub(super) fn project_txs(m: &SkipMap<TxID, Transaction>) -> Vec<(TxID, TxnSnapshot)> {
+    m.iter()
+        .map(|e| (*e.key(), TxnSnapshot::from(e.value())))
+        .collect()
+}
+
+/// Projector for the macro-generated `MvStore::inspect_finalized`
+/// accessor. Walks the `finalized_tx_states` `SkipMap` and projects each
+/// `TransactionState` into an owned `FinalStateSnapshot` via the
+/// `From<&TransactionState>` impl above.
+pub(super) fn project_finalized(
+    m: &SkipMap<TxID, TransactionState>,
+) -> Vec<(TxID, FinalStateSnapshot)> {
+    m.iter()
+        .map(|e| (*e.key(), FinalStateSnapshot::from(e.value())))
+        .collect()
+}
+
 impl<Clock: LogicalClock> MvStore<Clock> {
     /// Current value of `MvStore::tx_ids` (the next-tx-id allocator).
     /// Reads with `Acquire` to align with the allocator's `fetch_add`.
@@ -165,9 +189,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
         }
         if let Some(entry) = self.txs.get(&tx_id) {
             let encoded = entry.value().state.state.load(Ordering::Acquire);
-            if let TransactionState::Committed(ts) =
-                TransactionState::decode(encoded)
-            {
+            if let TransactionState::Committed(ts) = TransactionState::decode(encoded) {
                 return Some(ts);
             }
         }

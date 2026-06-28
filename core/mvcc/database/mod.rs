@@ -3392,7 +3392,10 @@ pub struct MvStore<Clock: LogicalClock> {
     /// `differential` submodule.
     #[cfg_attr(
         feature = "differential-accessors",
-        inspect(TxnSnapshot)
+        inspect(
+            ret = Vec<(TxID, TxnSnapshot)>,
+            with = crate::mvcc::database::differential::project_txs
+        )
     )]
     txs: SkipMap<TxID, Transaction>,
     /// Final state for removed transactions. Readers may still race with stale TxID
@@ -3403,7 +3406,11 @@ pub struct MvStore<Clock: LogicalClock> {
     /// accessor surface via `#[inspect(..., name = "...")]`.
     #[cfg_attr(
         feature = "differential-accessors",
-        inspect(FinalStateSnapshot, name = "finalized")
+        inspect(
+            ret = Vec<(TxID, FinalStateSnapshot)>,
+            with = crate::mvcc::database::differential::project_finalized,
+            name = "finalized"
+        )
     )]
     finalized_tx_states: SkipMap<TxID, TransactionState>,
     tx_ids: AtomicU64,
