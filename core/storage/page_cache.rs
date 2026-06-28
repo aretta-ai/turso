@@ -836,6 +836,76 @@ impl PageCache {
     }
 }
 
+/// Differential-testing accessors for `PageCache`.
+///
+/// Only compiled under `--features differential-accessors`. They expose the
+/// private `evictable_count` field, the private `count_evictable_pages()`
+/// recompute, and a total (non-panicking) form of the test-only
+/// `verify_cache_integrity`, for the Aretta Books page-cache conformance
+/// harness at `verification/db/flavors/turso/page-cache-conformance/` in the
+/// companion `aretta-books` repo (drives spec S-182, the evictable_count
+/// coherence GUARANTEE `evictable_count == count_evictable_pages()`).
+///
+/// NEVER use these in production — they scan the cache and exist only so the
+/// conformance harness can read internal accounting/structure state.
+#[cfg(feature = "differential-accessors")]
+impl PageCache {
+    /// The materialized evictable-page counter (the field that drifts under B1).
+    pub fn inspect_evictable_count(&self) -> usize {
+        self.evictable_count
+    }
+
+    /// The TRUE count of counted-as-evictable resident pages, recomputed from
+    /// residency — the oracle value the counter must equal (coherence GUARANTEE).
+    pub fn inspect_count_evictable_pages(&self) -> usize {
+        self.count_evictable_pages()
+    }
+
+    /// Total form of `verify_cache_integrity`: returns `false` instead of
+    /// `panic!`-ing, so the harness can assert structural well-formedness
+    /// (map↔queue bijection, no duplicate keys, clock-hand validity) as a
+    /// divergence rather than crashing the run.
+    pub fn inspect_cache_integrity_ok(&self) -> bool {
+        use rustc_hash::FxHashSet as HashSet;
+
+        let map_len = self.map.len();
+        let mut queue_len = 0usize;
+        let mut seen_keys = HashSet::default();
+        let mut cursor = self.queue.front();
+        while let Some(entry) = cursor.get() {
+            queue_len += 1;
+            seen_keys.insert(entry.key);
+            cursor.move_next();
+        }
+
+        if map_len != queue_len {
+            return false;
+        }
+        if map_len != seen_keys.len() {
+            return false;
+        }
+        for &key in self.map.keys() {
+            if !seen_keys.contains(&key) {
+                return false;
+            }
+        }
+
+        if !self.clock_hand.is_null() {
+            if map_len == 0 {
+                return false;
+            }
+            let hand_key = unsafe { (*self.clock_hand).key };
+            if !self.map.contains_key(&hand_key) {
+                return false;
+            }
+        } else if map_len != 0 {
+            return false;
+        }
+
+        true
+    }
+}
+
 impl Default for PageCache {
     fn default() -> Self {
         PageCache::new(DEFAULT_PAGE_CACHE_SIZE_IN_PAGES)
