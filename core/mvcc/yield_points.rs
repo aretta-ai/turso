@@ -1,3 +1,9 @@
+// In production (no test / injected_yields) the injector type surface is inert —
+// the macros self-gate to no-ops and no injector is ever installed — so these
+// `pub(crate)` types are deliberately dead there; only test/injected_yields builds
+// (which install an injector) actually use them.
+#![cfg_attr(not(any(test, injected_yields)), allow(dead_code))]
+
 use std::fmt::Debug;
 
 use crate::LimboError;

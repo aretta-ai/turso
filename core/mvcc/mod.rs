@@ -39,7 +39,16 @@ pub mod persistent_storage;
 pub mod portable_logical;
 #[cfg(any(test, injected_yields))]
 pub(crate) mod yield_hooks;
+// The yield/fault-injection type surface (YieldPoint / YieldInjector /
+// FailureInjector) is only public under test / injected_yields, so an external
+// harness can install an injector; in production it stays `pub(crate)` so these
+// inert verification types never ship as public API. The module itself is always
+// compiled (the inject_* macros are called unconditionally from cursor/state
+// machines and self-gate to no-ops). Mirrors the `page_cache` cfg-split.
+#[cfg(any(test, injected_yields))]
 pub mod yield_points;
+#[cfg(not(any(test, injected_yields)))]
+pub(crate) mod yield_points;
 pub use clock::MvccClock;
 pub use database::MvStore;
 
