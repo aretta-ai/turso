@@ -725,6 +725,12 @@ pub trait Wal: Debug + Send + Sync {
     fn get_checkpoint_seq(&self) -> u32;
     fn get_max_frame(&self) -> u64;
     fn get_min_frame(&self) -> u64;
+    /// Owned snapshot of the connection-local installed read-snapshot fields
+    /// (`max_frame`/`min_frame`/`transaction_count`/`checkpoint_seq`) persisted
+    /// on this WAL handle by `install_connection_state`. Unlike
+    /// `get_checkpoint_seq`, the `checkpoint_seq` here is the installed value,
+    /// not the shared coordination value.
+    fn installed_snapshot(&self) -> crate::types::WalInstalledSnapshot;
     fn rollback(&self, rollback_to: Option<RollbackTo>);
     fn abort_checkpoint(&self);
     fn get_last_checksum(&self) -> (u32, u32);
@@ -3808,6 +3814,15 @@ impl Wal for WalFile {
 
     fn get_min_frame(&self) -> u64 {
         self.min_frame.load(Ordering::Acquire)
+    }
+
+    fn installed_snapshot(&self) -> crate::types::WalInstalledSnapshot {
+        crate::types::WalInstalledSnapshot {
+            max_frame: self.max_frame.load(Ordering::Acquire),
+            min_frame: self.min_frame.load(Ordering::Acquire),
+            transaction_count: self.transaction_count.load(Ordering::Acquire),
+            checkpoint_seq: self.checkpoint_seq.load(Ordering::Acquire),
+        }
     }
 
     fn get_last_checksum(&self) -> (u32, u32) {

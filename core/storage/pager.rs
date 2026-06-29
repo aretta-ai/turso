@@ -21,7 +21,7 @@ use crate::sync::atomic::{
 };
 use crate::sync::Arc;
 use crate::sync::{Mutex, RwLock};
-use crate::types::{IOCompletions, WalState};
+use crate::types::{IOCompletions, WalInstalledSnapshot, WalState};
 use crate::util::IOExt as _;
 use crate::{
     io::CompletionGroup, return_if_io, types::WalFrameInfo, Completion, Connection, IOResult,
@@ -3278,6 +3278,42 @@ impl Pager {
             checkpoint_seq_no: wal.get_checkpoint_seq(),
             max_frame: wal.get_max_frame(),
         })
+    }
+
+    /// Whether this pager's WAL handle currently holds the write lock (pure
+    /// read of `WalFile.write_lock_held`). `false` when there is no WAL.
+    pub fn wal_holds_write_lock(&self) -> bool {
+        self.wal.as_ref().is_some_and(|wal| wal.holds_write_lock())
+    }
+
+    /// The connection-local installed WAL read snapshot
+    /// (`max_frame`/`min_frame`/`transaction_count`/`checkpoint_seq`).
+    pub fn wal_installed_snapshot(&self) -> Result<WalInstalledSnapshot> {
+        let Some(wal) = self.wal.as_ref() else {
+            turso_soft_unreachable!("wal_installed_snapshot() called on database without WAL");
+            return Err(LimboError::InternalError(
+                "wal_installed_snapshot() called on database without WAL".to_string(),
+            ));
+        };
+        Ok(wal.installed_snapshot())
+    }
+
+    /// RAW `WalFile::find_frame(page_id, frame_watermark)` lookup: `Some(frame_id)`
+    /// if the page is present in the readable WAL range at/under the watermark.
+    /// May `turso_assert!`-panic when `frame_watermark < nbackfills` (the caller
+    /// is expected to guard / `catch_unwind`).
+    pub fn wal_find_frame_raw(
+        &self,
+        page_id: u64,
+        frame_watermark: Option<u64>,
+    ) -> Result<Option<u64>> {
+        let Some(wal) = self.wal.as_ref() else {
+            turso_soft_unreachable!("wal_find_frame_raw() called on database without WAL");
+            return Err(LimboError::InternalError(
+                "wal_find_frame_raw() called on database without WAL".to_string(),
+            ));
+        };
+        wal.find_frame(page_id, frame_watermark)
     }
 
     /// Flush all dirty pages to disk (async/re-entrant).

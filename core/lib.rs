@@ -301,6 +301,10 @@ pub enum SharedWalCoordinationOpenTelemetryMode {
 pub struct SharedWalOpenTelemetry {
     pub loaded_from_disk_scan: bool,
     pub reopened_max_frame: u64,
+    /// The shared commit version stamp `WalFileShared.metadata.transaction_count`
+    /// (Acquire load) at observation time. Paired with `reopened_max_frame`,
+    /// these advance together on each commit in coherent (untorn) history.
+    pub reopened_transaction_count: u64,
     pub reopened_nbackfills: u64,
     pub reopened_checkpoint_seq: u32,
     pub coordination_open_mode: Option<SharedWalCoordinationOpenTelemetryMode>,
@@ -2359,6 +2363,8 @@ impl Database {
             .loaded_from_disk_scan
             .load(Ordering::Acquire);
         let reopened_max_frame = shared_wal.metadata.max_frame.load(Ordering::Acquire);
+        let reopened_transaction_count =
+            shared_wal.metadata.transaction_count.load(Ordering::Acquire);
         let reopened_nbackfills = shared_wal.metadata.nbackfills.load(Ordering::Acquire);
         let reopened_checkpoint_seq = shared_wal.metadata.wal_header.lock().checkpoint_seq;
         drop(shared_wal);
@@ -2384,11 +2390,39 @@ impl Database {
         Ok(SharedWalOpenTelemetry {
             loaded_from_disk_scan,
             reopened_max_frame,
+            reopened_transaction_count,
             reopened_nbackfills,
             reopened_checkpoint_seq,
             coordination_open_mode,
             sanitized_backfill_proof_on_open,
         })
+    }
+
+    /// The REAL in-memory `WalFileShared.metadata.initialized` AtomicBool
+    /// (`Acquire` load) — the flag `prepare_wal_finish` flips, distinct from the
+    /// on-disk file-existence proxy.
+    #[cfg(feature = "conn_raw_api")]
+    pub fn shared_wal_initialized(&self) -> bool {
+        self.shared_wal
+            .read()
+            .metadata
+            .initialized
+            .load(Ordering::Acquire)
+    }
+
+    /// Owned snapshot of the shared WAL `frame_cache` (page→frame-ids index),
+    /// sorted by page-id; frame-id lists are stored ascending.
+    #[cfg(feature = "conn_raw_api")]
+    pub fn shared_wal_frame_cache_snapshot(&self) -> Vec<(u64, Vec<u64>)> {
+        let shared_wal = self.shared_wal.read();
+        let frame_cache = shared_wal.runtime.frame_cache.lock();
+        let mut out: Vec<(u64, Vec<u64>)> = frame_cache
+            .iter()
+            .map(|(&page_id, frames)| (page_id, frames.clone()))
+            .collect();
+        drop(frame_cache);
+        out.sort_unstable_by_key(|(page_id, _)| *page_id);
+        out
     }
 
     #[cfg(feature = "simulator")]
