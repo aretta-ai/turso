@@ -59,16 +59,16 @@ pub use checkpoint_state_machine::{
 };
 
 /// Differential-testing accessors for the Aretta Books MVCC
-/// conformance harness. Gated on the `differential-accessors`
+/// conformance harness. Gated on the `aristo-instr`
 /// feature; never compiled in production builds.
-#[cfg(feature = "differential-accessors")]
+#[cfg(feature = "aristo-instr")]
 pub mod differential;
 
 // Re-import the snapshot types into scope so the `aristo::instrument::Inspect`
 // derive on `MvStore` can name them in `#[inspect(...)]` tags without
 // qualifying through `self::differential::`. Both types live in
 // `differential.rs` (see ACCESSORS.md rows 1-2).
-#[cfg(feature = "differential-accessors")]
+#[cfg(feature = "aristo-instr")]
 use self::differential::{FinalStateSnapshot, RecoveredSchemaRecord, TxnSnapshot};
 
 #[cfg(feature = "conn_raw_api")]
@@ -429,13 +429,13 @@ impl LogRecord {
     /// scenarios witness.
     ///
     /// Mirrors the existing `pub(crate) fn new` pattern; identical body.
-    /// Gated on the `differential-accessors` feature alongside the
+    /// Gated on the `aristo-instr` feature alongside the
     /// `MvStore::diff_*` accessors so production builds never see it.
     /// **NEVER use in production.**
     ///
     /// Catalog row: `verification/db/flavors/turso/ACCESSORS.md` (in the
     /// aretta-books repo).
-    #[cfg(feature = "differential-accessors")]
+    #[cfg(feature = "aristo-instr")]
     pub fn new_for_test(tx_timestamp: TxID) -> Self {
         Self::new(tx_timestamp)
     }
@@ -3365,12 +3365,12 @@ pub struct RowidAllocator {
 /// A multi-version concurrency control database.
 #[derive(Debug)]
 #[cfg_attr(
-    feature = "differential-accessors",
+    feature = "aristo-instr",
     derive(aristo::instrument::Inspect)
 )]
 pub struct MvStore<Clock: LogicalClock> {
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         inspect(
             ret = Vec<RecoveredSchemaRecord>,
             with = crate::mvcc::database::differential::project_recovered_schema_records,
@@ -3399,7 +3399,7 @@ pub struct MvStore<Clock: LogicalClock> {
     /// `TxnSnapshot` is a lossy owned shadow defined in the
     /// `differential` submodule.
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         inspect(
             ret = Vec<(TxID, TxnSnapshot)>,
             with = crate::mvcc::database::differential::project_txs
@@ -3413,7 +3413,7 @@ pub struct MvStore<Clock: LogicalClock> {
     /// name (`finalized_tx_states`) is shortened to `finalized` in the
     /// accessor surface via `#[inspect(..., name = "...")]`.
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         inspect(
             ret = Vec<(TxID, FinalStateSnapshot)>,
             with = crate::mvcc::database::differential::project_finalized,
@@ -3422,12 +3422,12 @@ pub struct MvStore<Clock: LogicalClock> {
     )]
     finalized_tx_states: SkipMap<TxID, TransactionState>,
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         inspect(ret = u64, with = |a| a.load(crate::sync::atomic::Ordering::Acquire), name = "tx_ids_value")
     )]
     tx_ids: AtomicU64,
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         inspect(ret = u64, with = |a| a.load(crate::sync::atomic::Ordering::Acquire), name = "version_id_counter_value")
     )]
     version_id_counter: AtomicU64,
@@ -3469,7 +3469,7 @@ pub struct MvStore<Clock: LogicalClock> {
     /// If there are two concurrent BEGIN (non-CONCURRENT) transactions, and one tries to promote
     /// to exclusive, it will abort if another transaction committed after its begin timestamp.
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         inspect(ret = u64, with = |a| a.load(crate::sync::atomic::Ordering::Acquire) + 1, name = "peek_next_ts")
     )]
     last_committed_tx_ts: AtomicU64,

@@ -3203,7 +3203,7 @@ impl Pager {
     /// page-cache handle so a conformance harness can read the `inspect_*`
     /// accessors on the very `PageCache` that `add_dirty` mutates. Exposed
     /// publicly through `expose_pub` as `inspect_page_cache_handle`.
-    #[cfg(feature = "differential-accessors")]
+    #[cfg(feature = "aristo-instr")]
     #[aristo::instrument::expose_pub(as = "inspect_page_cache_handle")]
     fn page_cache_handle(&self) -> crate::sync::Arc<crate::sync::RwLock<PageCache>> {
         self.page_cache.clone()
@@ -3217,7 +3217,7 @@ impl Pager {
     /// Exposed
     /// publicly through `expose_pub` as `inspect_new_test_pager` so the
     /// page-cache-conformance harness can drive the real `add_dirty` path.
-    #[cfg(feature = "differential-accessors")]
+    #[cfg(feature = "aristo-instr")]
     #[aristo::instrument::expose_pub(as = "inspect_new_test_pager")]
     fn new_for_differential_test() -> Self {
         use crate::io::{MemoryIO, OpenFlags, IO};

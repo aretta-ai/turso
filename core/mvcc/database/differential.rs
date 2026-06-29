@@ -1,6 +1,6 @@
 //! Differential-testing accessors for `MvStore`.
 //!
-//! Only compiled under `--features differential-accessors`. Exposes
+//! Only compiled under `--features aristo-instr`. Exposes
 //! owned snapshots of private `MvStore` internals (`txs`,
 //! `finalized_tx_states`, the version-id / tx-id counters, a
 //! `commit_ts` lookup, and the recovered `sqlite_schema` row versions

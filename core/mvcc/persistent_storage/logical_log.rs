@@ -532,7 +532,7 @@ fn derive_initial_crc(salt: u64) -> u32 {
     crc32c::crc32c(&salt.to_le_bytes())
 }
 
-#[cfg_attr(feature = "differential-accessors", derive(aristo::instrument::Inspect))]
+#[cfg_attr(feature = "aristo-instr", derive(aristo::instrument::Inspect))]
 pub struct LogicalLog {
     pub file: Arc<dyn File>,
     io: Arc<dyn crate::IO>,
@@ -545,7 +545,7 @@ pub struct LogicalLog {
     /// macro-generated `inspect_header_version()` accessor to observe this
     /// divergence.
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         inspect(ret = Option<u8>, with = |h| h.as_ref().map(|x| x.version), name = "header_version")
     )]
     header: Option<LogHeader>,
@@ -557,7 +557,7 @@ pub struct LogicalLog {
     /// `advance_offset_after_success` so that an abandoned write
     /// doesn't corrupt the chain. Projected for the H-1 catch via the
     /// macro-generated `inspect_pending_running_crc()` (ACCESSORS.md row 8).
-    #[cfg_attr(feature = "differential-accessors", inspect)]
+    #[cfg_attr(feature = "aristo-instr", inspect)]
     pending_running_crc: Option<u32>,
     encryption_ctx: Option<EncryptionContext>,
     /// Plaintext bytes per encrypted payload chunk. Production uses the fixed format constant;

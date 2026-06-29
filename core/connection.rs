@@ -160,7 +160,7 @@ impl Drop for SchemaReparseGuard {
 /// If you add a setting that affects SQL compilation or execution, call
 /// `bump_prepare_context_generation()` in its setter so cached prepared
 /// statements know they need to be reprepared.
-#[cfg_attr(feature = "differential-accessors", derive(aristo::instrument::Inspect))]
+#[cfg_attr(feature = "aristo-instr", derive(aristo::instrument::Inspect))]
 pub struct Connection {
     pub(crate) db: Arc<Database>,
     pub(crate) pager: ArcSwap<Pager>,
@@ -224,7 +224,7 @@ pub struct Connection {
     /// Per-attached-database MVCC transactions.
     /// Main DB uses `mv_tx` above for zero-cost hot path access.
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         inspect(
             ret = Vec<(usize, u64)>,
             with = |m| m.read().iter().map(|(db, (tx_id, _))| (*db, *tx_id)).collect(),
@@ -3282,7 +3282,7 @@ impl Connection {
     /// feature-gated `inspect_mv_tx()` for the MVCC conformance harness (ACCESSORS.md
     /// row 10 — the #6013 conn→tx binding). Production callers use `get_mv_tx_id`.
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         aristo::instrument::expose_pub(as = "inspect_mv_tx")
     )]
     pub(crate) fn get_mv_tx_id(&self) -> Option<u64> {

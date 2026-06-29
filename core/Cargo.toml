@@ -26,14 +26,14 @@ conn_raw_api = []
 # model at `formal/ArettaBooks/Flavors/Turso/MvccModel/`. Never use in
 # production; only the verification crate enables this. Codegen is
 # provided by `aristo::instrument` (the `Inspect` derive + `#[inspect(...)]`
-# field tags). The alias below routes Turso's `differential-accessors`
+# field tags). The alias below routes Turso's `aristo-instr`
 # flag through to aristo's `aristo_instrument` convention flag. See
 # `verification/db/flavors/turso/ACCESSORS.md` in aretta-books and
 # `docs-site/design/aristo-instrument-handoff.md` for the migration plan.
 # aristo is a non-optional dep (the `#[aristo::intent]` annotations on main need
 # it unconditionally), so this feature only flips on aristo's instrument codegen
 # — `dep:aristo` would require an optional dep and is dropped post-crates.io merge.
-differential-accessors = ["aristo/aristo_instrument"]
+aristo-instr = ["aristo/aristo_instrument"]
 fs = ["turso_ext/vfs"]
 json = []
 uuid = ["dep:uuid"]
@@ -106,7 +106,7 @@ turso_macros = { workspace = true }
 # Aretta Books differential-testing instrumentation (the `Inspect` derive +
 # `#[inspect(...)]` field tags, `expose_pub`, `yield_point!`) is provided by the
 # same `aristo` crate declared above — non-optional because the `#[aristo::intent]`
-# annotations need it unconditionally. The `differential-accessors` feature flips
+# annotations need it unconditionally. The `aristo-instr` feature flips
 # on aristo's `aristo_instrument` codegen; no separate (optional) dep is needed.
 miette = { workspace = true }
 strum = { workspace = true }

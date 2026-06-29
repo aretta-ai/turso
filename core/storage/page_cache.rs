@@ -97,7 +97,7 @@ pub enum SpillResult {
 /// New pages are inserted after the clock hand in the `next` direction,
 /// which places them at head (MRU) (i.e. `tail.next` is the head).
 #[cfg_attr(
-    feature = "differential-accessors",
+    feature = "aristo-instr",
     derive(aristo::instrument::Inspect)
 )]
 pub struct PageCache {
@@ -113,7 +113,7 @@ pub struct PageCache {
     spill_threshold: usize,
     spill_enabled: bool,
     /// Conservative estimation of pages that are evictable based on dirty/spilled state.
-    #[cfg_attr(feature = "differential-accessors", inspect)]
+    #[cfg_attr(feature = "aristo-instr", inspect)]
     evictable_count: usize,
 }
 
@@ -453,7 +453,7 @@ impl PageCache {
     #[inline]
     /// Count pages that can be evicted without spilling.
     #[cfg_attr(
-        feature = "differential-accessors",
+        feature = "aristo-instr",
         aristo::instrument::expose_pub(as = "inspect_count_evictable_pages")
     )]
     fn count_evictable_pages(&self) -> usize {
@@ -793,7 +793,7 @@ impl PageCache {
         self.map.keys().copied().collect()
     }
 
-    // The `differential-accessors` feature widens this module to `pub`
+    // The `aristo-instr` feature widens this module to `pub`
     // (see core/storage/mod.rs), which promotes `len` to true public API and
     // trips `clippy::len_without_is_empty`. The cache has no `is_empty`
     // caller, so allow the lint rather than grow an unused method.
@@ -849,7 +849,7 @@ impl PageCache {
     /// differential-testing harness, which needs a boolean it can
     /// compare against the model rather than a panic. Exposed publicly
     /// through `expose_pub` as `inspect_cache_integrity_ok`.
-    #[cfg(feature = "differential-accessors")]
+    #[cfg(feature = "aristo-instr")]
     #[aristo::instrument::expose_pub(as = "inspect_cache_integrity_ok")]
     fn cache_integrity_ok(&self) -> bool {
         use rustc_hash::FxHashSet as HashSet;
