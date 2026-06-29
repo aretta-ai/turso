@@ -69,7 +69,7 @@ pub mod differential;
 // qualifying through `self::differential::`. Both types live in
 // `differential.rs` (see ACCESSORS.md rows 1-2).
 #[cfg(feature = "differential-accessors")]
-use self::differential::{FinalStateSnapshot, TxnSnapshot};
+use self::differential::{FinalStateSnapshot, RecoveredSchemaRecord, TxnSnapshot};
 
 #[cfg(feature = "conn_raw_api")]
 use super::persistent_storage::logical_log::{
@@ -3369,6 +3369,14 @@ pub struct RowidAllocator {
     derive(aristo::instrument::Inspect)
 )]
 pub struct MvStore<Clock: LogicalClock> {
+    #[cfg_attr(
+        feature = "differential-accessors",
+        inspect(
+            ret = Vec<RecoveredSchemaRecord>,
+            with = crate::mvcc::database::differential::project_recovered_schema_records,
+            name = "recovered_schema_records"
+        )
+    )]
     pub rows: SkipMap<RowID, Arc<RwLock<Vec<RowVersion>>>>,
     /// Table ID is an opaque identifier that is only meaningful to the MV store.
     /// Each checkpointed MVCC table corresponds to a single B-tree on the pager,
@@ -3413,7 +3421,15 @@ pub struct MvStore<Clock: LogicalClock> {
         )
     )]
     finalized_tx_states: SkipMap<TxID, TransactionState>,
+    #[cfg_attr(
+        feature = "differential-accessors",
+        inspect(ret = u64, with = |a| a.load(crate::sync::atomic::Ordering::Acquire), name = "tx_ids_value")
+    )]
     tx_ids: AtomicU64,
+    #[cfg_attr(
+        feature = "differential-accessors",
+        inspect(ret = u64, with = |a| a.load(crate::sync::atomic::Ordering::Acquire), name = "version_id_counter_value")
+    )]
     version_id_counter: AtomicU64,
     next_rowid: AtomicU64,
     next_table_id: AtomicI64,
@@ -3452,6 +3468,10 @@ pub struct MvStore<Clock: LogicalClock> {
     /// The timestamp of the last committed transaction.
     /// If there are two concurrent BEGIN (non-CONCURRENT) transactions, and one tries to promote
     /// to exclusive, it will abort if another transaction committed after its begin timestamp.
+    #[cfg_attr(
+        feature = "differential-accessors",
+        inspect(ret = u64, with = |a| a.load(crate::sync::atomic::Ordering::Acquire) + 1, name = "peek_next_ts")
+    )]
     last_committed_tx_ts: AtomicU64,
     table_id_to_last_rowid: RwLock<HashMap<MVTableId, Arc<RowidAllocator>>>,
 }

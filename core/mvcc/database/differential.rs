@@ -20,11 +20,11 @@
 //! dep machinery — the conformance harness only cares about the
 //! Lean-projected fields.
 
-use crate::mvcc::clock::LogicalClock;
 use crate::mvcc::database::{
-    MvStore, RowID, RowKey, SQLITE_SCHEMA_MVCC_TABLE_ID, Transaction, TransactionState, TxID,
+    RowID, RowKey, RowVersion, SQLITE_SCHEMA_MVCC_TABLE_ID, Transaction, TransactionState, TxID,
 };
 use crate::sync::atomic::Ordering;
+use crate::sync::{Arc, RwLock};
 use crossbeam_skiplist::SkipMap;
 
 /// Owned snapshot of a `TransactionState`. Mirrors the private enum.
@@ -154,94 +154,34 @@ pub(super) fn project_finalized(
         .collect()
 }
 
-impl<Clock: LogicalClock> MvStore<Clock> {
-    /// Current value of `MvStore::tx_ids` (the next-tx-id allocator).
-    /// Reads with `Acquire` to align with the allocator's `fetch_add`.
-    pub fn inspect_tx_ids_value(&self) -> u64 {
-        self.tx_ids.load(Ordering::Acquire)
-    }
-
-    /// Current value of `MvStore::version_id_counter` (the next-
-    /// version-id allocator). Reads with `Acquire` for the same
-    /// reason as `inspect_tx_ids_value`.
-    pub fn inspect_version_id_counter_value(&self) -> u64 {
-        self.version_id_counter.load(Ordering::Acquire)
-    }
-
-    /// Peek the next commit timestamp the clock would publish, without
-    /// consuming it. Mirrors the semantic of the Lean model's
-    /// `MvccState.nextTs` — "the smallest timestamp the next commit
-    /// could plausibly be assigned, given everything that has already
-    /// committed".
-    ///
-    /// Implementation: derived from `last_committed_tx_ts + 1`. We do
-    /// NOT peek `MvccClock`'s internal `Mutex<u64>` because the clock
-    /// burns timestamps on `begin_tx` as well as `commit_tx`, while
-    /// Lean's `nextTs` advances only on commit. The
-    /// `last_committed_tx_ts` atomic is published by `commit_tx`
-    /// alongside the durable commit so it tracks the same monotone
-    /// landmark Lean does.
-    ///
-    /// Note: in the empty state both this accessor and Lean's
-    /// `nextTs` are 0 only if no commit has happened. The accessor
-    /// returns `last_committed_tx_ts + 1` (so after a commit at ts=1
-    /// it returns 2, matching Lean's `nextTs := max(nextTs, ts+1)`).
-    /// To make the after-begin boundary line up, the Lean model's
-    /// `Op.begin` handler maxes `nextTs` against `extBeginTs + 1` —
-    /// see `Step.lean::Op.begin`.
-    pub fn inspect_peek_next_ts(&self) -> u64 {
-        self.last_committed_tx_ts.load(Ordering::Acquire) + 1
-    }
-
-    /// Look up the commit timestamp for `tx_id`. Checks
-    /// `finalized_tx_states` first (where committed txns live after
-    /// the commit-state-machine drives to terminal), falling back to
-    /// the live `txs` table (where a committed tx may still sit for a
-    /// short window before being moved). Returns `None` if the tx is
-    /// not found, was aborted, or has not yet committed.
-    pub fn inspect_commit_ts(&self, tx_id: TxID) -> Option<u64> {
-        if let Some(entry) = self.finalized_tx_states.get(&tx_id) {
-            if let TransactionState::Committed(ts) = *entry.value() {
-                return Some(ts);
-            }
+/// Projector for the macro-generated `MvStore::inspect_recovered_schema_records`
+/// accessor (ACCESSORS.md row 12) — referenced by the `#[inspect(..., with = ...)]`
+/// tag on `MvStore::rows`. Walks every resident key, keeps only the `sqlite_schema`
+/// MVCC table (`table_id == SQLITE_SCHEMA_MVCC_TABLE_ID`, `-1`) with an integer
+/// `RowKey`, and emits one `RecoveredSchemaRecord` per `RowVersion` (per-version
+/// read lock taken transiently). Read PRE-checkpoint / pre-GC so an empty-payload
+/// tombstone synthesized by `maybe_recover_logical_log` is still observable — the
+/// #6005 decodability coordinate (`records.all(|r| !r.payload_empty)`).
+pub(super) fn project_recovered_schema_records(
+    rows: &SkipMap<RowID, Arc<RwLock<Vec<RowVersion>>>>,
+) -> Vec<RecoveredSchemaRecord> {
+    let mut records = Vec::new();
+    for entry in rows.iter() {
+        let id = entry.key();
+        if id.table_id != SQLITE_SCHEMA_MVCC_TABLE_ID {
+            continue;
         }
-        if let Some(entry) = self.txs.get(&tx_id) {
-            let encoded = entry.value().state.state.load(Ordering::Acquire);
-            if let TransactionState::Committed(ts) = TransactionState::decode(encoded) {
-                return Some(ts);
-            }
+        let rowid = match &id.row_id {
+            RowKey::Int(rowid) => *rowid,
+            RowKey::Record(_) => continue,
+        };
+        for version in entry.value().read().iter() {
+            records.push(RecoveredSchemaRecord {
+                rowid,
+                payload_empty: version.row.payload().is_empty(),
+                ended: version.end.is_some(),
+            });
         }
-        None
     }
-
-    /// Snapshot the recovered `sqlite_schema` row versions held in
-    /// `MvStore::rows` (ACCESSORS.md row 12). Walks every resident key,
-    /// keeps only the `sqlite_schema` MVCC table
-    /// (`table_id == SQLITE_SCHEMA_MVCC_TABLE_ID`, `-1`) with an integer
-    /// `RowKey`, and emits one `RecoveredSchemaRecord` per `RowVersion`
-    /// in the chain (per-version read lock taken transiently). Read
-    /// PRE-checkpoint / pre-GC so an empty-payload tombstone synthesized
-    /// by `maybe_recover_logical_log` is still observable — the #6005
-    /// decodability coordinate (`records.all(|r| !r.payload_empty)`).
-    pub fn inspect_recovered_schema_records(&self) -> Vec<RecoveredSchemaRecord> {
-        let mut records = Vec::new();
-        for entry in self.rows.iter() {
-            let id = entry.key();
-            if id.table_id != SQLITE_SCHEMA_MVCC_TABLE_ID {
-                continue;
-            }
-            let rowid = match &id.row_id {
-                RowKey::Int(rowid) => *rowid,
-                RowKey::Record(_) => continue,
-            };
-            for version in entry.value().read().iter() {
-                records.push(RecoveredSchemaRecord {
-                    rowid,
-                    payload_empty: version.row.payload().is_empty(),
-                    ended: version.end.is_some(),
-                });
-            }
-        }
-        records
-    }
+    records
 }

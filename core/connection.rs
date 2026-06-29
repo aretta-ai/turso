@@ -160,6 +160,7 @@ impl Drop for SchemaReparseGuard {
 /// If you add a setting that affects SQL compilation or execution, call
 /// `bump_prepare_context_generation()` in its setter so cached prepared
 /// statements know they need to be reprepared.
+#[cfg_attr(feature = "differential-accessors", derive(aristo::instrument::Inspect))]
 pub struct Connection {
     pub(crate) db: Arc<Database>,
     pub(crate) pager: ArcSwap<Pager>,
@@ -222,6 +223,14 @@ pub struct Connection {
     pub(crate) mv_tx: RwLock<Option<(crate::mvcc::database::TxID, TransactionMode)>>,
     /// Per-attached-database MVCC transactions.
     /// Main DB uses `mv_tx` above for zero-cost hot path access.
+    #[cfg_attr(
+        feature = "differential-accessors",
+        inspect(
+            ret = Vec<(usize, u64)>,
+            with = |m| m.read().iter().map(|(db, (tx_id, _))| (*db, *tx_id)).collect(),
+            name = "attached_mv_txs"
+        )
+    )]
     pub(crate) attached_mv_txs:
         RwLock<HashMap<usize, (crate::mvcc::database::TxID, TransactionMode)>>,
     #[cfg(any(test, injected_yields))]
@@ -3269,6 +3278,13 @@ impl Connection {
         matches!(self.get_tx_state(), TransactionState::Write { .. })
     }
 
+    /// `expose_pub(as = "inspect_mv_tx")` raises this internal getter to a public,
+    /// feature-gated `inspect_mv_tx()` for the MVCC conformance harness (ACCESSORS.md
+    /// row 10 — the #6013 conn→tx binding). Production callers use `get_mv_tx_id`.
+    #[cfg_attr(
+        feature = "differential-accessors",
+        aristo::instrument::expose_pub(as = "inspect_mv_tx")
+    )]
     pub(crate) fn get_mv_tx_id(&self) -> Option<u64> {
         self.mv_tx.read().map(|(tx_id, _)| tx_id)
     }
@@ -3658,37 +3674,6 @@ impl SymbolTable {
         for (name, module) in &other.index_methods {
             self.index_methods.insert(name.clone(), module.clone());
         }
-    }
-}
-
-/// Differential-testing accessors — only compiled under
-/// `differential-accessors`. Exposed for the Aretta Books MVCC
-/// conformance harness (ACCESSORS.md rows 10–11) to project the
-/// per-connection conn→tx binding (the harness's `conns` coordinate),
-/// the slot mutated SEPARATELY from `MvStore::txs` that surfaces the
-/// #6013 divergence. NEVER use in production: they take locks and
-/// allocate per call.
-#[cfg(feature = "differential-accessors")]
-impl Connection {
-    /// ACCESSORS.md row 10 — the MAIN-DB per-connection conn→tx binding
-    /// (`self.mv_tx`), the authoritative source of the harness's `conns`
-    /// coordinate. Projects to just the `TxID`, dropping the mode. Mirrors
-    /// the `pub(crate)` `get_mv_tx_id` under a public, feature-gated name
-    /// the harness can call across the crate boundary.
-    pub fn inspect_mv_tx(&self) -> Option<u64> {
-        self.mv_tx.read().map(|(tx_id, _)| tx_id)
-    }
-
-    /// ACCESSORS.md row 11 — the per-ATTACHED-database MVCC tx bindings
-    /// (`self.attached_mv_txs`), completing the `conns` projection for
-    /// attached databases (the main-DB binding comes from `inspect_mv_tx`).
-    /// Empty in the MVP main-db scenarios.
-    pub fn inspect_attached_mv_txs(&self) -> Vec<(usize, u64)> {
-        self.attached_mv_txs
-            .read()
-            .iter()
-            .map(|(db, (tx_id, _))| (*db, *tx_id))
-            .collect()
     }
 }
 
