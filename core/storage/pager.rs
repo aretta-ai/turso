@@ -21,7 +21,7 @@ use crate::sync::atomic::{
 };
 use crate::sync::Arc;
 use crate::sync::{Mutex, RwLock};
-use crate::types::{IOCompletions, WalInstalledSnapshot, WalState};
+use crate::types::{IOCompletions, WalState};
 use crate::util::IOExt as _;
 use crate::{
     io::CompletionGroup, return_if_io, types::WalFrameInfo, Completion, Connection, IOResult,
@@ -3280,40 +3280,13 @@ impl Pager {
         })
     }
 
-    /// Whether this pager's WAL handle currently holds the write lock (pure
-    /// read of `WalFile.write_lock_held`). `false` when there is no WAL.
-    pub fn wal_holds_write_lock(&self) -> bool {
-        self.wal.as_ref().is_some_and(|wal| wal.holds_write_lock())
-    }
-
-    /// The connection-local installed WAL read snapshot
-    /// (`max_frame`/`min_frame`/`transaction_count`/`checkpoint_seq`).
-    pub fn wal_installed_snapshot(&self) -> Result<WalInstalledSnapshot> {
-        let Some(wal) = self.wal.as_ref() else {
-            turso_soft_unreachable!("wal_installed_snapshot() called on database without WAL");
-            return Err(LimboError::InternalError(
-                "wal_installed_snapshot() called on database without WAL".to_string(),
-            ));
-        };
-        Ok(wal.installed_snapshot())
-    }
-
-    /// RAW `WalFile::find_frame(page_id, frame_watermark)` lookup: `Some(frame_id)`
-    /// if the page is present in the readable WAL range at/under the watermark.
-    /// May `turso_assert!`-panic when `frame_watermark < nbackfills` (the caller
-    /// is expected to guard / `catch_unwind`).
-    pub fn wal_find_frame_raw(
-        &self,
-        page_id: u64,
-        frame_watermark: Option<u64>,
-    ) -> Result<Option<u64>> {
-        let Some(wal) = self.wal.as_ref() else {
-            turso_soft_unreachable!("wal_find_frame_raw() called on database without WAL");
-            return Err(LimboError::InternalError(
-                "wal_find_frame_raw() called on database without WAL".to_string(),
-            ));
-        };
-        wal.find_frame(page_id, frame_watermark)
+    /// Verification-only: clone this pager's WAL handle so the conformance
+    /// harness can call the public `Wal` trait methods (`holds_write_lock`,
+    /// `installed_snapshot`, `find_frame`) on it. Surfaced publicly on
+    /// `Connection` via the aristo-instr `expose_pub` `inspect_wal_handle`.
+    #[cfg(feature = "aristo-instr")]
+    pub(crate) fn wal_handle(&self) -> Option<crate::sync::Arc<dyn crate::storage::wal::Wal>> {
+        self.wal.clone()
     }
 
     /// Flush all dirty pages to disk (async/re-entrant).

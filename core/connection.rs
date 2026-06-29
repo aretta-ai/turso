@@ -10,7 +10,7 @@ use crate::sync::{
     Arc, RwLock,
 };
 #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
-use crate::types::{WalFrameInfo, WalInstalledSnapshot, WalState};
+use crate::types::{WalFrameInfo, WalState};
 #[cfg(feature = "fs")]
 use crate::util::{OpenMode, OpenOptions};
 #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
@@ -1521,31 +1521,16 @@ impl Connection {
         self.pager.load().wal_state()
     }
 
-    /// Whether THIS connection's WAL handle currently holds the write lock
-    /// (pure `Acquire` read of `WalFile.write_lock_held`).
-    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
-    pub fn wal_holds_write_lock(&self) -> bool {
-        self.pager.load().wal_holds_write_lock()
-    }
-
-    /// The connection-local installed WAL read snapshot persisted on `WalFile`
-    /// after `try_begin_read_tx` (`max_frame`/`min_frame`/`transaction_count`/
-    /// `checkpoint_seq`).
-    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
-    pub fn wal_installed_snapshot(&self) -> Result<WalInstalledSnapshot> {
-        self.pager.load().wal_installed_snapshot()
-    }
-
-    /// RAW `WalFile::find_frame(page_id, frame_watermark)` lookup. May
-    /// `turso_assert!`-panic when `frame_watermark < nbackfills`; callers probing
-    /// the below-floor path should `catch_unwind`.
-    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
-    pub fn wal_find_frame_raw(
-        &self,
-        page_id: u64,
-        frame_watermark: Option<u64>,
-    ) -> Result<Option<u64>> {
-        self.pager.load().wal_find_frame_raw(page_id, frame_watermark)
+    /// Verification-only: the aristo-instr `expose_pub` raises this to a public
+    /// `inspect_wal_handle()` returning this connection's WAL handle, so the
+    /// conformance harness can call the public `Wal` trait methods
+    /// (`holds_write_lock`, `installed_snapshot`, `find_frame`) on it. Mirrors
+    /// the page-cache `inspect_page_cache_handle` precedent (delegates to the
+    /// pub(crate) `Pager::wal_handle`).
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_wal_handle")]
+    fn wal_handle(&self) -> Option<crate::sync::Arc<dyn crate::storage::wal::Wal>> {
+        self.pager.load().wal_handle()
     }
 
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]

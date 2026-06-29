@@ -729,7 +729,10 @@ pub trait Wal: Debug + Send + Sync {
     /// (`max_frame`/`min_frame`/`transaction_count`/`checkpoint_seq`) persisted
     /// on this WAL handle by `install_connection_state`. Unlike
     /// `get_checkpoint_seq`, the `checkpoint_seq` here is the installed value,
-    /// not the shared coordination value.
+    /// not the shared coordination value. Verification-only (the conformance
+    /// harness reaches it through the aristo-instr `inspect_wal_handle`), so the
+    /// method is gated behind `aristo-instr` and compiles away in production.
+    #[cfg(feature = "aristo-instr")]
     fn installed_snapshot(&self) -> crate::types::WalInstalledSnapshot;
     fn rollback(&self, rollback_to: Option<RollbackTo>);
     fn abort_checkpoint(&self);
@@ -2716,9 +2719,50 @@ impl OpenSharedWal {
 }
 
 /// WalFileShared holds process-wide WAL metadata plus process-local coordination state.
+///
+/// The aristo-instr `Inspect` derive emits the verification-only accessors the
+/// WAL conformance harness reaches via `Database::inspect_shared_wal_handle()`:
+/// `inspect_shared_wal_initialized()` and `inspect_shared_wal_frame_cache_snapshot()`.
+#[cfg_attr(feature = "aristo-instr", derive(aristo::instrument::Inspect))]
 pub struct WalFileShared {
+    /// `inspect_shared_wal_initialized()` — the real in-memory
+    /// `metadata.initialized` AtomicBool (the flag `prepare_wal_finish` flips),
+    /// distinct from the on-disk file-existence proxy.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(
+            name = "shared_wal_initialized",
+            ret = bool,
+            with = |m| m.initialized.load(Ordering::Acquire)
+        )
+    )]
     pub metadata: WalSharedMetadata,
+    /// `inspect_shared_wal_frame_cache_snapshot()` — an owned, page-id-sorted
+    /// snapshot of the shared `frame_cache` (page -> ascending frame-ids).
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(
+            name = "shared_wal_frame_cache_snapshot",
+            ret = Vec<(u64, Vec<u64>)>,
+            with = project_shared_wal_frame_cache
+        )
+    )]
     pub runtime: WalSharedRuntime,
+}
+
+/// Projector for the aristo-instr `inspect_shared_wal_frame_cache_snapshot`
+/// accessor on `WalFileShared::runtime`. Owned, page-id-sorted snapshot of the
+/// shared WAL `frame_cache`; frame-id lists are stored ascending.
+#[cfg(feature = "aristo-instr")]
+fn project_shared_wal_frame_cache(runtime: &WalSharedRuntime) -> Vec<(u64, Vec<u64>)> {
+    let frame_cache = runtime.frame_cache.lock();
+    let mut out: Vec<(u64, Vec<u64>)> = frame_cache
+        .iter()
+        .map(|(&page_id, frames)| (page_id, frames.clone()))
+        .collect();
+    drop(frame_cache);
+    out.sort_unstable_by_key(|(page_id, _)| *page_id);
+    out
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -3816,6 +3860,7 @@ impl Wal for WalFile {
         self.min_frame.load(Ordering::Acquire)
     }
 
+    #[cfg(feature = "aristo-instr")]
     fn installed_snapshot(&self) -> crate::types::WalInstalledSnapshot {
         crate::types::WalInstalledSnapshot {
             max_frame: self.max_frame.load(Ordering::Acquire),

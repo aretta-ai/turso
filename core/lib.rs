@@ -2398,31 +2398,16 @@ impl Database {
         })
     }
 
-    /// The REAL in-memory `WalFileShared.metadata.initialized` AtomicBool
-    /// (`Acquire` load) — the flag `prepare_wal_finish` flips, distinct from the
-    /// on-disk file-existence proxy.
-    #[cfg(feature = "conn_raw_api")]
-    pub fn shared_wal_initialized(&self) -> bool {
-        self.shared_wal
-            .read()
-            .metadata
-            .initialized
-            .load(Ordering::Acquire)
-    }
-
-    /// Owned snapshot of the shared WAL `frame_cache` (page→frame-ids index),
-    /// sorted by page-id; frame-id lists are stored ascending.
-    #[cfg(feature = "conn_raw_api")]
-    pub fn shared_wal_frame_cache_snapshot(&self) -> Vec<(u64, Vec<u64>)> {
-        let shared_wal = self.shared_wal.read();
-        let frame_cache = shared_wal.runtime.frame_cache.lock();
-        let mut out: Vec<(u64, Vec<u64>)> = frame_cache
-            .iter()
-            .map(|(&page_id, frames)| (page_id, frames.clone()))
-            .collect();
-        drop(frame_cache);
-        out.sort_unstable_by_key(|(page_id, _)| *page_id);
-        out
+    /// Verification-only handle to the shared WAL. The aristo-instr `expose_pub`
+    /// raises this to a public `inspect_shared_wal_handle()` so the conformance
+    /// harness can read the `Inspect`-derived accessors on the very
+    /// `WalFileShared` the engine mutates — `inspect_shared_wal_initialized()`
+    /// and `inspect_shared_wal_frame_cache_snapshot()` (page-cache handle
+    /// precedent: `Pager::inspect_page_cache_handle`).
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_shared_wal_handle")]
+    fn shared_wal_handle(&self) -> Arc<RwLock<WalFileShared>> {
+        self.shared_wal.clone()
     }
 
     #[cfg(feature = "simulator")]
