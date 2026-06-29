@@ -3661,6 +3661,37 @@ impl SymbolTable {
     }
 }
 
+/// Differential-testing accessors — only compiled under
+/// `differential-accessors`. Exposed for the Aretta Books MVCC
+/// conformance harness (ACCESSORS.md rows 10–11) to project the
+/// per-connection conn→tx binding (the harness's `conns` coordinate),
+/// the slot mutated SEPARATELY from `MvStore::txs` that surfaces the
+/// #6013 divergence. NEVER use in production: they take locks and
+/// allocate per call.
+#[cfg(feature = "differential-accessors")]
+impl Connection {
+    /// ACCESSORS.md row 10 — the MAIN-DB per-connection conn→tx binding
+    /// (`self.mv_tx`), the authoritative source of the harness's `conns`
+    /// coordinate. Projects to just the `TxID`, dropping the mode. Mirrors
+    /// the `pub(crate)` `get_mv_tx_id` under a public, feature-gated name
+    /// the harness can call across the crate boundary.
+    pub fn inspect_mv_tx(&self) -> Option<u64> {
+        self.mv_tx.read().map(|(tx_id, _)| tx_id)
+    }
+
+    /// ACCESSORS.md row 11 — the per-ATTACHED-database MVCC tx bindings
+    /// (`self.attached_mv_txs`), completing the `conns` projection for
+    /// attached databases (the main-DB binding comes from `inspect_mv_tx`).
+    /// Empty in the MVP main-db scenarios.
+    pub fn inspect_attached_mv_txs(&self) -> Vec<(usize, u64)> {
+        self.attached_mv_txs
+            .read()
+            .iter()
+            .map(|(db, (tx_id, _))| (*db, *tx_id))
+            .collect()
+    }
+}
+
 #[cfg(all(test, feature = "fs"))]
 mod tests {
     use super::*;

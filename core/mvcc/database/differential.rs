@@ -2,9 +2,9 @@
 //!
 //! Only compiled under `--features differential-accessors`. Exposes
 //! owned snapshots of private `MvStore` internals (`txs`,
-//! `finalized_tx_states`, the version-id / tx-id counters, and a
-//! `commit_ts` lookup) for use by the Aretta Books MVCC conformance
-//! harness at
+//! `finalized_tx_states`, the version-id / tx-id counters, a
+//! `commit_ts` lookup, and the recovered `sqlite_schema` row versions
+//! in `rows`) for use by the Aretta Books MVCC conformance harness at
 //! `verification/db/flavors/turso/mvcc-conformance/` in the
 //! companion `aretta-books` repo.
 //!
@@ -21,7 +21,9 @@
 //! Lean-projected fields.
 
 use crate::mvcc::clock::LogicalClock;
-use crate::mvcc::database::{MvStore, RowID, Transaction, TransactionState, TxID};
+use crate::mvcc::database::{
+    MvStore, RowID, RowKey, SQLITE_SCHEMA_MVCC_TABLE_ID, Transaction, TransactionState, TxID,
+};
 use crate::sync::atomic::Ordering;
 use crossbeam_skiplist::SkipMap;
 
@@ -69,6 +71,22 @@ pub struct TxnSnapshot {
 /// `TxnStateSnapshot`; kept as a type alias so the public surface
 /// documents which `MvStore` field each accessor reads.
 pub type FinalStateSnapshot = TxnStateSnapshot;
+
+/// One recovered `sqlite_schema` row version, projected for the #6005
+/// decodability coordinate (ACCESSORS.md row 12) — the harness's window
+/// onto the schema row versions held in `MvStore::rows` AFTER
+/// `maybe_recover_logical_log` (read PRE-checkpoint, before any GC).
+/// `payload_empty` is the EXACT discriminator the #6005 fix keys on in
+/// `sqlite_schema_btree_identity` (`if version.row.payload().is_empty()
+/// { return None }`); `ended` records whether the version is a tombstone
+/// (delete) at read time. Lets the DT judge #6005 via the decodability
+/// model coordinate instead of an out-of-band checkpoint panic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecoveredSchemaRecord {
+    pub rowid: i64,
+    pub payload_empty: bool,
+    pub ended: bool,
+}
 
 /// Project a live `Transaction` into a `TxnSnapshot` — used by the
 /// macro-generated `MvStore::inspect_txs` accessor (ACCESSORS.md row 1).
@@ -194,5 +212,36 @@ impl<Clock: LogicalClock> MvStore<Clock> {
             }
         }
         None
+    }
+
+    /// Snapshot the recovered `sqlite_schema` row versions held in
+    /// `MvStore::rows` (ACCESSORS.md row 12). Walks every resident key,
+    /// keeps only the `sqlite_schema` MVCC table
+    /// (`table_id == SQLITE_SCHEMA_MVCC_TABLE_ID`, `-1`) with an integer
+    /// `RowKey`, and emits one `RecoveredSchemaRecord` per `RowVersion`
+    /// in the chain (per-version read lock taken transiently). Read
+    /// PRE-checkpoint / pre-GC so an empty-payload tombstone synthesized
+    /// by `maybe_recover_logical_log` is still observable — the #6005
+    /// decodability coordinate (`records.all(|r| !r.payload_empty)`).
+    pub fn inspect_recovered_schema_records(&self) -> Vec<RecoveredSchemaRecord> {
+        let mut records = Vec::new();
+        for entry in self.rows.iter() {
+            let id = entry.key();
+            if id.table_id != SQLITE_SCHEMA_MVCC_TABLE_ID {
+                continue;
+            }
+            let rowid = match &id.row_id {
+                RowKey::Int(rowid) => *rowid,
+                RowKey::Record(_) => continue,
+            };
+            for version in entry.value().read().iter() {
+                records.push(RecoveredSchemaRecord {
+                    rowid,
+                    payload_empty: version.row.payload().is_empty(),
+                    ended: version.end.is_some(),
+                });
+            }
+        }
+        records
     }
 }
