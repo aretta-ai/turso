@@ -3220,6 +3220,17 @@ impl Pager {
     #[cfg(feature = "aristo-instr")]
     #[aristo::instrument::expose_pub(as = "inspect_new_test_pager")]
     fn new_for_differential_test() -> Self {
+        Self::new_for_differential_test_with_capacity(64)
+    }
+
+    /// Like [`new_for_differential_test`] but with an explicit page-cache
+    /// capacity, so the conformance harness can drive capacity-pressure
+    /// scenarios (`needs_spill` fast path / S-198) at a small, controlled
+    /// capacity. Exposed publicly through `expose_pub` as
+    /// `inspect_new_test_pager_with_capacity`.
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_new_test_pager_with_capacity")]
+    fn new_for_differential_test_with_capacity(cache_capacity: usize) -> Self {
         use crate::io::{MemoryIO, OpenFlags, IO};
         use crate::storage::database::DatabaseFile;
 
@@ -3240,7 +3251,7 @@ impl Pager {
             db_file,
             None,
             io,
-            PageCache::new(pages as usize),
+            PageCache::new(cache_capacity),
             buffer_pool,
             Arc::new(Mutex::new(())),
             init_page_1,
