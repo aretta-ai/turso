@@ -1,0 +1,6 @@
+id = "single_writer_serialization"
+text = "At most one write transaction is active at any time."
+file = "core/storage/wal.rs"
+site = "impl Wal for WalFile::begin_write_tx (line 3134)"
+text_hash = "sha256:d16aa772ea444a24fe7d5b54b1ecc927219bf244b7766fab6df8900c11fcbed1"
+body_hash = "sha256:5fc204131678684ae7e095733a29dea9176ed9aeeb95dbed62dc62c2fc370595"

@@ -1,0 +1,6 @@
+id = "wal_protocol_correctness"
+text = "The WAL subsystem maintains LSN monotonicity, frame commitment ordering, recovery idempotency, checkpoint safety, and group commit atomicity."
+file = "core/storage/wal.rs"
+site = "trait Wal (line 597)"
+text_hash = "sha256:9e70f3e012c13ec400044e473cb06d4935d943af34d40aa0e04d7acb7e3ada86"
+body_hash = "sha256:3627e8fd855d64d269a1c927fe4a88b02e1edd4db64e2ffc93b704d24b701552"

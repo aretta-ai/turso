@@ -1,0 +1,6 @@
+id = "storage_compaction_correctness"
+text = "A compaction operation preserves logical content, preserves all schema and engine metadata, does not increase physical footprint, and is atomic under crash."
+file = "core/vdbe/vacuum.rs"
+site = "impl VacuumInPlaceOpContext::step (line 1309)"
+text_hash = "sha256:97fe88919d9e3576ad0a1cf49c9f78dc6dde1cbac96ecaa828373ead0229a0fc"
+body_hash = "sha256:e7556fd9b3ab8de47ceb763405164978d7e26dfd440d4cbd7e98059b05571796"
