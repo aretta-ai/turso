@@ -16,6 +16,15 @@ pub(crate) mod checksum;
 pub mod database;
 pub(crate) mod encryption;
 pub(crate) mod journal_mode;
+// Differential-testing harnesses (page-cache conformance) need to name
+// `PageCache` / `PageCacheKey` and read the `inspect_*` accessors from an
+// external crate. The module is `pub(crate)` by default; the
+// `aristo-instr` feature widens it to `pub` so the conformance
+// crate can reach those (already-`pub`) types. No behavior change without
+// the feature.
+#[cfg(feature = "aristo-instr")]
+pub mod page_cache;
+#[cfg(not(feature = "aristo-instr"))]
 pub(crate) mod page_cache;
 #[allow(clippy::arc_with_non_send_sync)]
 pub(crate) mod pager;

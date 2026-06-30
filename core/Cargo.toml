@@ -20,6 +20,20 @@ path = "lib.rs"
 default = ["fs", "uuid", "time", "json", "series", "encryption", "percentile"]
 tracing_release = ["tracing/release_max_level_info"]
 conn_raw_api = []
+# Aretta Books MVCC conformance harness — exposes owned snapshots of
+# private `MvStore` internals (`txs`, `finalized_tx_states`, counter
+# values, commit_ts lookup) for differential testing against the Lean
+# model at `formal/ArettaBooks/Flavors/Turso/MvccModel/`. Never use in
+# production; only the verification crate enables this. Codegen is
+# provided by `aristo::instrument` (the `Inspect` derive + `#[inspect(...)]`
+# field tags). The alias below routes Turso's `aristo-instr`
+# flag through to aristo's `aristo_instrument` convention flag. See
+# `verification/db/flavors/turso/ACCESSORS.md` in aretta-books and
+# `docs-site/design/aristo-instrument-handoff.md` for the migration plan.
+# aristo is a non-optional dep (the `#[aristo::intent]` annotations on main need
+# it unconditionally), so this feature only flips on aristo's instrument codegen
+# — `dep:aristo` would require an optional dep and is dropped post-crates.io merge.
+aristo-instr = ["aristo/aristo_instrument"]
 fs = ["turso_ext/vfs"]
 json = []
 uuid = ["dep:uuid"]
@@ -72,6 +86,10 @@ libloading = "0.8.6"
 tantivy = { version = "0.26.0", optional = true }
 
 [dependencies]
+# aristo SDK from crates.io (published 0.3.x). Was a local sibling path
+# (../../aristo) pre-OSS; the conformance harness now resolves aristo +
+# aristo-macros from crates.io, so no vendored mount / path-rewrite is needed.
+aristo = "0.3"
 turso_ext = { workspace = true, features = ["core_only"] }
 cfg_block = "0.1.1"
 fallible-iterator = { workspace = true }
@@ -88,6 +106,11 @@ chrono = { workspace = true, default-features = false, features = ["clock"] }
 rand = { workspace = true }
 libm = "0.2"
 turso_macros = { workspace = true }
+# Aretta Books differential-testing instrumentation (the `Inspect` derive +
+# `#[inspect(...)]` field tags, `expose_pub`, `yield_point!`) is provided by the
+# same `aristo` crate declared above — non-optional because the `#[aristo::intent]`
+# annotations need it unconditionally. The `aristo-instr` feature flips
+# on aristo's `aristo_instrument` codegen; no separate (optional) dep is needed.
 miette = { workspace = true }
 strum = { workspace = true }
 parking_lot = { workspace = true, features = ["arc_lock"] }

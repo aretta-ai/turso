@@ -595,6 +595,7 @@ trait WalCoordination: Debug + Send + Sync {
 }
 
 /// Write-ahead log (WAL).
+#[aristo::intent("The WAL subsystem maintains LSN monotonicity, frame commitment ordering, recovery idempotency, checkpoint safety, and group commit atomicity.", id = "wal_protocol_correctness", verify = "neural")]
 pub trait Wal: Debug + Send + Sync {
     /// Begin a read transaction.
     /// Returns whether the database state has changed since the last read transaction.
@@ -724,6 +725,15 @@ pub trait Wal: Debug + Send + Sync {
     fn get_checkpoint_seq(&self) -> u32;
     fn get_max_frame(&self) -> u64;
     fn get_min_frame(&self) -> u64;
+    /// Owned snapshot of the connection-local installed read-snapshot fields
+    /// (`max_frame`/`min_frame`/`transaction_count`/`checkpoint_seq`) persisted
+    /// on this WAL handle by `install_connection_state`. Unlike
+    /// `get_checkpoint_seq`, the `checkpoint_seq` here is the installed value,
+    /// not the shared coordination value. Verification-only (the conformance
+    /// harness reaches it through the aristo-instr `inspect_wal_handle`), so the
+    /// method is gated behind `aristo-instr` and compiles away in production.
+    #[cfg(feature = "aristo-instr")]
+    fn installed_snapshot(&self) -> crate::types::WalInstalledSnapshot;
     fn rollback(&self, rollback_to: Option<RollbackTo>);
     fn abort_checkpoint(&self);
     fn get_last_checksum(&self) -> (u32, u32);
@@ -2709,9 +2719,50 @@ impl OpenSharedWal {
 }
 
 /// WalFileShared holds process-wide WAL metadata plus process-local coordination state.
+///
+/// The aristo-instr `Inspect` derive emits the verification-only accessors the
+/// WAL conformance harness reaches via `Database::inspect_shared_wal_handle()`:
+/// `inspect_shared_wal_initialized()` and `inspect_shared_wal_frame_cache_snapshot()`.
+#[cfg_attr(feature = "aristo-instr", derive(aristo::instrument::Inspect))]
 pub struct WalFileShared {
+    /// `inspect_shared_wal_initialized()` — the real in-memory
+    /// `metadata.initialized` AtomicBool (the flag `prepare_wal_finish` flips),
+    /// distinct from the on-disk file-existence proxy.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(
+            name = "shared_wal_initialized",
+            ret = bool,
+            with = |m| m.initialized.load(Ordering::Acquire)
+        )
+    )]
     pub metadata: WalSharedMetadata,
+    /// `inspect_shared_wal_frame_cache_snapshot()` — an owned, page-id-sorted
+    /// snapshot of the shared `frame_cache` (page -> ascending frame-ids).
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(
+            name = "shared_wal_frame_cache_snapshot",
+            ret = Vec<(u64, Vec<u64>)>,
+            with = project_shared_wal_frame_cache
+        )
+    )]
     pub runtime: WalSharedRuntime,
+}
+
+/// Projector for the aristo-instr `inspect_shared_wal_frame_cache_snapshot`
+/// accessor on `WalFileShared::runtime`. Owned, page-id-sorted snapshot of the
+/// shared WAL `frame_cache`; frame-id lists are stored ascending.
+#[cfg(feature = "aristo-instr")]
+fn project_shared_wal_frame_cache(runtime: &WalSharedRuntime) -> Vec<(u64, Vec<u64>)> {
+    let frame_cache = runtime.frame_cache.lock();
+    let mut out: Vec<(u64, Vec<u64>)> = frame_cache
+        .iter()
+        .map(|(&page_id, frames)| (page_id, frames.clone()))
+        .collect();
+    drop(frame_cache);
+    out.sort_unstable_by_key(|(page_id, _)| *page_id);
+    out
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -3148,6 +3199,11 @@ impl Wal for WalFile {
 
     /// Begin a write transaction
     #[instrument(skip_all, level = Level::DEBUG)]
+    #[aristo::intent(
+        "At most one write transaction is active at any time.",
+        id = "single_writer_serialization",
+        verify = "neural"
+    )]
     fn begin_write_tx(&self, allowed_auto_actions: WalAutoActions) -> Result<()> {
         tracing::debug!("begin_write_tx");
         let begin_write_result: Result<()> = {
@@ -3248,6 +3304,12 @@ impl Wal for WalFile {
 
     /// Find the latest frame containing a page.
     #[instrument(skip_all, level = Level::DEBUG)]
+    #[aristo::intent(
+        "find_frame never reads outside the live frame range [nbackfills, max_frame]\n",
+        id = "aristos:wal_find_frame_range_invariant",
+        verify = "full",
+        parent = "wal_protocol_correctness"
+    )]
     fn find_frame(&self, page_id: u64, frame_watermark: Option<u64>) -> Result<Option<u64>> {
         #[cfg(not(feature = "conn_raw_api"))]
         turso_assert!(
@@ -3798,6 +3860,16 @@ impl Wal for WalFile {
         self.min_frame.load(Ordering::Acquire)
     }
 
+    #[cfg(feature = "aristo-instr")]
+    fn installed_snapshot(&self) -> crate::types::WalInstalledSnapshot {
+        crate::types::WalInstalledSnapshot {
+            max_frame: self.max_frame.load(Ordering::Acquire),
+            min_frame: self.min_frame.load(Ordering::Acquire),
+            transaction_count: self.transaction_count.load(Ordering::Acquire),
+            checkpoint_seq: self.checkpoint_seq.load(Ordering::Acquire),
+        }
+    }
+
     fn get_last_checksum(&self) -> (u32, u32) {
         *self.last_checksum.read()
     }
@@ -3850,6 +3922,7 @@ impl Wal for WalFile {
         });
     }
 
+    #[aristo::intent("Writers and VACUUM serialize: at most one of them can modify the database at any instant\n", id = "aristos:vacuum_single_writer_serialized", verify = "full", parent = "single_writer_serialization")]
     fn begin_vacuum_blocking_tx(&self) -> Result<()> {
         turso_assert!(
             self.max_frame_read_lock_index.load(Ordering::Acquire) == NO_LOCK_HELD,
@@ -4000,6 +4073,12 @@ impl Wal for WalFile {
         }
     }
 
+    #[aristo::intent(
+        "The WAL initialized flag is set true only after a successful sync of the wal-header\n",
+        id = "aristos:wal_initialized_reflects_sync_outcome",
+        verify = "full",
+        parent = "wal_protocol_correctness"
+    )]
     fn prepare_wal_finish(&self, sync_type: FileSyncType) -> Result<Completion> {
         let file = self.coordination.wal_file()?;
         let coordination = self.coordination.clone();
@@ -4462,6 +4541,12 @@ impl WalFile {
         Ok(())
     }
 
+    #[aristo::intent(
+        "A checkpoint failure must not leak frames into the main database file\n",
+        id = "aristos:wal_checkpoint_error_no_db_leak",
+        verify = "full",
+        parent = "wal_protocol_correctness"
+    )]
     fn checkpoint_inner(
         &self,
         pager: &Pager,
@@ -4840,6 +4925,7 @@ impl WalFile {
     }
 
     /// Truncate WAL file to zero and sync it. Called by pager AFTER DB file is synced.
+    #[aristo::intent("WAL truncate is atomic: no committed frame can be observed lost across the truncate operation\n", id = "aristos:wal_truncate_atomic_under_concurrent_writers", verify = "full", parent = "wal_protocol_correctness")]
     fn truncate_log(
         &self,
         result: &mut CheckpointResult,

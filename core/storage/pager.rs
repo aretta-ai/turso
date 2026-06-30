@@ -3333,6 +3333,66 @@ impl Pager {
         Ok(page_cache.resize(capacity))
     }
 
+    /// Differential-testing accessor: hand back a clone of the shared
+    /// page-cache handle so a conformance harness can read the `inspect_*`
+    /// accessors on the very `PageCache` that `add_dirty` mutates. Exposed
+    /// publicly through `expose_pub` as `inspect_page_cache_handle`.
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_page_cache_handle")]
+    fn page_cache_handle(&self) -> crate::sync::Arc<crate::sync::RwLock<PageCache>> {
+        self.page_cache.clone()
+    }
+
+    /// Differential-testing constructor: builds a minimal in-memory
+    /// `Pager` mirroring the test-only `test_pager_setup` (MemoryIO +
+    /// DatabaseFile + BufferPool + page-1 seed; WAL omitted — see body),
+    /// using items (`default_page1`, `ArcSwapOption`, `Mutex`) that are
+    /// in-scope here but not reachable from an external conformance crate.
+    /// Exposed
+    /// publicly through `expose_pub` as `inspect_new_test_pager` so the
+    /// page-cache-conformance harness can drive the real `add_dirty` path.
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_new_test_pager")]
+    fn new_for_differential_test() -> Self {
+        Self::new_for_differential_test_with_capacity(64)
+    }
+
+    /// Like [`new_for_differential_test`] but with an explicit page-cache
+    /// capacity, so the conformance harness can drive capacity-pressure
+    /// scenarios (`needs_spill` fast path / S-198) at a small, controlled
+    /// capacity. Exposed publicly through `expose_pub` as
+    /// `inspect_new_test_pager_with_capacity`.
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_new_test_pager_with_capacity")]
+    fn new_for_differential_test_with_capacity(cache_capacity: usize) -> Self {
+        use crate::io::{MemoryIO, OpenFlags, IO};
+        use crate::storage::database::DatabaseFile;
+
+        let page_size: u32 = 4096;
+        let pages: u32 = 64;
+        let io: Arc<dyn IO> = Arc::new(MemoryIO::new());
+        let db_file: Arc<dyn DatabaseStorage> = Arc::new(DatabaseFile::new(
+            io.open_file("test.db", OpenFlags::Create, true).unwrap(),
+        ));
+        let buffer_pool = BufferPool::begin_init(&io, (pages * page_size) as usize);
+        // No WAL needed: the B1 path (`add_dirty` -> dirty-set + cache
+        // notify + `set_dirty`) never touches the WAL, and the non-test
+        // `WalFileShared` constructor is `#[cfg(test)]`-gated. Page 1 is
+        // seeded so the pager is well-formed; the conformance scenario
+        // operates on page id 2.
+        let init_page_1 = Arc::new(ArcSwapOption::new(Some(default_page1(None))));
+        Pager::new(
+            db_file,
+            None,
+            io,
+            PageCache::new(cache_capacity),
+            buffer_pool,
+            Arc::new(Mutex::new(())),
+            init_page_1,
+        )
+        .unwrap()
+    }
+
     pub fn add_dirty(&self, page: &Page) -> Result<()> {
         turso_assert!(
             page.is_loaded(),
@@ -3367,6 +3427,15 @@ impl Pager {
             checkpoint_seq_no: wal.get_checkpoint_seq(),
             max_frame: wal.get_max_frame(),
         })
+    }
+
+    /// Verification-only: clone this pager's WAL handle so the conformance
+    /// harness can call the public `Wal` trait methods (`holds_write_lock`,
+    /// `installed_snapshot`, `find_frame`) on it. Surfaced publicly on
+    /// `Connection` via the aristo-instr `expose_pub` `inspect_wal_handle`.
+    #[cfg(feature = "aristo-instr")]
+    pub(crate) fn wal_handle(&self) -> Option<crate::sync::Arc<dyn crate::storage::wal::Wal>> {
+        self.wal.clone()
     }
 
     /// Flush all dirty pages to disk (async/re-entrant).
@@ -3962,6 +4031,7 @@ impl Pager {
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
+    #[aristo::intent("A commit frame must reach stable storage via fsync before the transaction is reported as durable\n", id = "aristos:wal_commit_requires_fsync", verify = "full", parent = "wal_protocol_correctness")]
     fn commit_dirty_pages_inner(
         &self,
         allowed_auto_actions: WalAutoActions,
@@ -4450,6 +4520,7 @@ impl Pager {
         )
     }
 
+    #[aristo::intent("The nbackfills counter advances after frames are durable, so recovery never replays already-checkpointed frames\n", id = "aristos:wal_nbackfills_orders_with_recovery", verify = "full", parent = "wal_protocol_correctness")]
     fn checkpoint_inner(
         &self,
         mode: CheckpointMode,

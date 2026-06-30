@@ -341,6 +341,7 @@ pub enum SyncRowStep {
 /// If you add a setting that affects SQL compilation or execution, call
 /// `bump_prepare_context_generation()` in its setter so cached prepared
 /// statements know they need to be reprepared.
+#[cfg_attr(feature = "aristo-instr", derive(aristo::instrument::Inspect))]
 pub struct Connection {
     pub(crate) db: Arc<Database>,
     pub(crate) pager: ArcSwap<Pager>,
@@ -414,6 +415,14 @@ pub struct Connection {
     pub(crate) mv_tx: RwLock<Option<(crate::mvcc::database::TxID, TransactionMode)>>,
     /// Per-attached-database MVCC transactions.
     /// Main DB uses `mv_tx` above for zero-cost hot path access.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(
+            ret = Vec<(usize, u64)>,
+            with = |m| m.read().iter().map(|(db, (tx_id, _))| (*db, *tx_id)).collect(),
+            name = "attached_mv_txs"
+        )
+    )]
     pub(crate) attached_mv_txs:
         RwLock<HashMap<usize, (crate::mvcc::database::TxID, TransactionMode)>>,
     #[cfg(any(test, injected_yields))]
@@ -1969,6 +1978,18 @@ impl Connection {
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn wal_state(&self) -> Result<WalState> {
         self.pager.load().wal_state()
+    }
+
+    /// Verification-only: the aristo-instr `expose_pub` raises this to a public
+    /// `inspect_wal_handle()` returning this connection's WAL handle, so the
+    /// conformance harness can call the public `Wal` trait methods
+    /// (`holds_write_lock`, `installed_snapshot`, `find_frame`) on it. Mirrors
+    /// the page-cache `inspect_page_cache_handle` precedent (delegates to the
+    /// pub(crate) `Pager::wal_handle`).
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_wal_handle")]
+    fn wal_handle(&self) -> Option<crate::sync::Arc<dyn crate::storage::wal::Wal>> {
+        self.pager.load().wal_handle()
     }
 
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
@@ -4301,6 +4322,13 @@ impl Connection {
         matches!(self.get_tx_state(), TransactionState::Write { .. })
     }
 
+    /// `expose_pub(as = "inspect_mv_tx")` raises this internal getter to a public,
+    /// feature-gated `inspect_mv_tx()` for the MVCC conformance harness (ACCESSORS.md
+    /// row 10 — the #6013 conn→tx binding). Production callers use `get_mv_tx_id`.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        aristo::instrument::expose_pub(as = "inspect_mv_tx")
+    )]
     pub(crate) fn get_mv_tx_id(&self) -> Option<u64> {
         self.mv_tx.read().map(|(tx_id, _)| tx_id)
     }

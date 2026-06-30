@@ -65,6 +65,19 @@ pub use checkpoint_state_machine::{
     sqlite_schema_btree_identity, CheckpointState, CheckpointStateMachine,
 };
 
+/// Differential-testing accessors for the Aretta Books MVCC
+/// conformance harness. Gated on the `aristo-instr`
+/// feature; never compiled in production builds.
+#[cfg(feature = "aristo-instr")]
+pub mod differential;
+
+// Re-import the snapshot types into scope so the `aristo::instrument::Inspect`
+// derive on `MvStore` can name them in `#[inspect(...)]` tags without
+// qualifying through `self::differential::`. Both types live in
+// `differential.rs` (see ACCESSORS.md rows 1-2).
+#[cfg(feature = "aristo-instr")]
+use self::differential::{FinalStateSnapshot, RecoveredSchemaRecord, TxnSnapshot};
+
 #[cfg(feature = "conn_raw_api")]
 use super::persistent_storage::logical_log::{
     encode_delete_portable_extension, parse_ops_from_plaintext, LOG_RECORD_PREFIX_SIZE,
@@ -527,6 +540,34 @@ impl LogRecord {
             #[cfg(feature = "conn_raw_api")]
             portable_changes_enabled: false,
         }
+    }
+
+    /// Differential-testing constructor for the aretta-books LogicalLog
+    /// conformance harness (H-1 / LWF organic catches). Produces a
+    /// payload-empty `LogRecord` whose buffer is just the pre-reserved
+    /// `LOG_HDR_SIZE + TX_HEADER_SIZE` framing prefix.
+    ///
+    /// The harness drives this record through
+    /// `LogicalLog::log_tx_deferred_offset` (H-1) or `LogicalLog::log_tx`
+    /// (LWF) with a `FaultInjectingIO` that fails the pwrite. With
+    /// `op_count = 0` and `has_header = false` the
+    /// `frame_and_pwrite_tx` path still backfills the 24-byte TX header,
+    /// computes a CRC over it, submits a pwrite, and sets
+    /// `pending_running_crc = Some(crc)` (deferred path) or advances
+    /// `offset` / `running_crc` (immediate path) BEFORE the faulted
+    /// completion fires — exactly the publish-before-fsync sites the
+    /// scenarios witness.
+    ///
+    /// Mirrors the existing `pub(crate) fn new` pattern; identical body.
+    /// Gated on the `aristo-instr` feature alongside the
+    /// `MvStore::diff_*` accessors so production builds never see it.
+    /// **NEVER use in production.**
+    ///
+    /// Catalog row: `verification/db/flavors/turso/ACCESSORS.md` (in the
+    /// aretta-books repo).
+    #[cfg(feature = "aristo-instr")]
+    pub fn new_for_test(tx_timestamp: TxID) -> Self {
+        Self::new(tx_timestamp)
     }
 
     /// True iff no ops (row versions or header) have been appended.
@@ -3769,7 +3810,16 @@ pub struct RecoverCtx {
 
 /// A multi-version concurrency control database.
 #[derive(Debug)]
+#[cfg_attr(feature = "aristo-instr", derive(aristo::instrument::Inspect))]
 pub struct MvStore<Clock: LogicalClock, A: ConcurrentAllocator = TursoAllocator> {
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(
+            ret = Vec<RecoveredSchemaRecord>,
+            with = crate::mvcc::database::differential::project_recovered_schema_records,
+            name = "recovered_schema_records"
+        )
+    )]
     pub rows: SkipMap<RowID, RowVersions<A>, BasicComparator, A>,
     /// Table ID is an opaque identifier that is only meaningful to the MV store.
     /// Each checkpointed MVCC table corresponds to a single B-tree on the pager,
@@ -3787,14 +3837,37 @@ pub struct MvStore<Clock: LogicalClock, A: ConcurrentAllocator = TursoAllocator>
     /// because operations like last() on an index are much easier when we don't have to take the
     /// table identifier into account.
     pub index_rows: SkipMap<MVTableId, IndexRowsMap<A>, BasicComparator, A>,
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(
+            ret = Vec<(TxID, TxnSnapshot)>,
+            with = crate::mvcc::database::differential::project_txs
+        )
+    )]
     txs: SkipMap<TxID, Transaction<A>, BasicComparator, A>,
     /// Final state for removed transactions. Readers may still race with stale TxID
     /// references in row versions after a transaction is removed from `txs`.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(
+            ret = Vec<(TxID, FinalStateSnapshot)>,
+            with = crate::mvcc::database::differential::project_finalized,
+            name = "finalized"
+        )
+    )]
     finalized_tx_states: SkipMap<TxID, TransactionState, BasicComparator, A>,
     /// Allocator backing every skiplist in this store, including lazily
     /// created per-index maps in `index_rows`.
     alloc: A,
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(ret = u64, with = |a| a.load(crate::sync::atomic::Ordering::Acquire), name = "tx_ids_value")
+    )]
     tx_ids: AtomicU64,
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(ret = u64, with = |a| a.load(crate::sync::atomic::Ordering::Acquire), name = "version_id_counter_value")
+    )]
     version_id_counter: AtomicU64,
     next_rowid: AtomicU64,
     next_table_id: AtomicI64,
@@ -3833,6 +3906,10 @@ pub struct MvStore<Clock: LogicalClock, A: ConcurrentAllocator = TursoAllocator>
     /// The timestamp of the last committed transaction.
     /// If there are two concurrent BEGIN (non-CONCURRENT) transactions, and one tries to promote
     /// to exclusive, it will abort if another transaction committed after its begin timestamp.
+    #[cfg_attr(
+        feature = "aristo-instr",
+        inspect(ret = u64, with = |a| a.load(crate::sync::atomic::Ordering::Acquire) + 1, name = "peek_next_ts")
+    )]
     last_committed_tx_ts: AtomicU64,
     /// `end_ts` of the most recent tx whose header was written into
     /// `global_header`. Used to gate header writes at both
