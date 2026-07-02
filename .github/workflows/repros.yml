@@ -1,0 +1,31 @@
+# Repros PR gate — runs only the generated-reproduction-test module
+# (tests/integration/repros/, seeded with a permanent green canary) so that
+# auto-generated repro PRs get a visible red/green check. The fork's inherited
+# upstream workflows (rust.yml etc.) are disabled; this is deliberately a
+# single minimal GitHub-hosted job. Governed by the repro-test-format contract.
+name: Repros
+
+on:
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  repros:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust-repros"
+          cache-on-failure: true
+      - name: Run repro tests
+        run: |
+          cargo test -p core_tester --test integration_tests repros:: --locked
