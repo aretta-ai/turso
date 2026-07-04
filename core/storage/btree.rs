@@ -827,6 +827,20 @@ pub struct BTreeCursorPosition {
     /// One entry per live stack level (root at index 0), each
     /// `(page_id, cell_idx, cell_count)`.
     pub levels: Vec<(i64, i32, Option<i32>)>,
+    /// Mirror of `iteration_pending_descent`: `None`, or `Some((is_forwards,
+    /// target_page))` — the in-flight descent recorded on an IO-yield so the
+    /// traversal loop resumes without re-mutating the cell index. Enables the
+    /// BTREE-CUR-2 short-circuit differential.
+    pub pending_descent: Option<(bool, i64)>,
+    /// saveAllCursors registry participation (#7341). `has_peers` mirrors
+    /// SQLite's BTCF_Multiple (another cursor is registered on this root);
+    /// `did_register` is true iff this cursor entered the pager registry.
+    pub has_peers: bool,
+    pub did_register: bool,
+    /// `context.is_some()` — a seek context is saved, i.e. the cursor will
+    /// re-seek after an external (peer) balance. The restore-side observable
+    /// of the saveAllCursors save/restore pass.
+    pub context_saved: bool,
 }
 
 impl BTreeCursor {
@@ -896,10 +910,20 @@ impl BTreeCursor {
                 levels.push((page_id, node_state.cell_idx, node_state.cell_count));
             }
         }
+        let pending_descent = self.iteration_pending_descent.map(|d| match d {
+            IterationPendingDescent::Forwards(t) => (true, t),
+            IterationPendingDescent::Backwards(t) => (false, t),
+        });
         BTreeCursorPosition {
             root_page: self.root_page,
             going_upwards: self.going_upwards,
             levels,
+            pending_descent,
+            has_peers: self.has_peers.load(crate::sync::atomic::Ordering::Relaxed),
+            did_register: self
+                .did_register
+                .load(crate::sync::atomic::Ordering::Relaxed),
+            context_saved: self.context.is_some(),
         }
     }
 
