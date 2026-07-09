@@ -1230,6 +1230,40 @@ struct SavepointSnapshot {
     deferred_fk_violations: isize,
 }
 
+/// Verification-only: harness-friendly, owned mirror of a `Savepoint`'s
+/// [`SavepointKind`] discriminant. Surfaced (through the aristo-instr
+/// `expose_pub` chain) inside [`SavepointFrameInfo`] so a conformance
+/// harness can read the restore-relevant identity of each stack frame
+/// without reaching the private `SavepointKind`. A `Statement` frame is
+/// reported as `{ name: None, starts_transaction: false, is_statement:
+/// true }`; a `Named { name, starts_transaction }` frame carries those
+/// fields with `is_statement: false`.
+#[cfg(feature = "aristo-instr")]
+#[derive(Debug, Clone)]
+pub struct SavepointKindInfo {
+    pub name: Option<String>,
+    pub starts_transaction: bool,
+    pub is_statement: bool,
+}
+
+/// Verification-only: an owned snapshot of a single `Savepoint`'s
+/// restore state, one per entry of the pager's savepoint stack. Produced
+/// by [`Pager::inspect_savepoint_stack`] and surfaced publicly on
+/// `Connection` through the aristo-instr `expose_pub` `inspect_savepoint_stack`.
+/// The working-set `page_bitmap` is intentionally excluded — it is a dirty-page
+/// optimization, not part of the state restored on rollback.
+#[cfg(feature = "aristo-instr")]
+#[derive(Debug, Clone)]
+pub struct SavepointFrameInfo {
+    pub kind: SavepointKindInfo,
+    pub start_offset: u64,
+    pub write_offset: u64,
+    pub db_size: u32,
+    pub wal_max_frame: u64,
+    pub wal_checksum: (u32, u32),
+    pub deferred_fk: i64,
+}
+
 struct Savepoint {
     kind: SavepointKind,
     /// Start offset of this savepoint in the subjournal.
@@ -3436,6 +3470,47 @@ impl Pager {
     #[cfg(feature = "aristo-instr")]
     pub(crate) fn wal_handle(&self) -> Option<crate::sync::Arc<dyn crate::storage::wal::Wal>> {
         self.wal.clone()
+    }
+
+    /// Verification-only: snapshot the whole savepoint stack (outermost..
+    /// innermost) as owned [`SavepointFrameInfo`] values so the conformance
+    /// harness can assert on the pager's per-frame restore state without
+    /// reaching the private `Savepoint`/`SavepointKind` types. Read-only:
+    /// clones the `RwLock`-guarded fields and reads the atomics with the same
+    /// `Acquire` ordering the restore paths use. Surfaced publicly on
+    /// `Connection` via the aristo-instr `expose_pub` `inspect_savepoint_stack`.
+    #[cfg(feature = "aristo-instr")]
+    pub(crate) fn inspect_savepoint_stack(&self) -> Vec<SavepointFrameInfo> {
+        self.savepoints
+            .read()
+            .iter()
+            .map(|sp| {
+                let kind = match &sp.kind {
+                    SavepointKind::Statement => SavepointKindInfo {
+                        name: None,
+                        starts_transaction: false,
+                        is_statement: true,
+                    },
+                    SavepointKind::Named {
+                        name,
+                        starts_transaction,
+                    } => SavepointKindInfo {
+                        name: Some(name.clone()),
+                        starts_transaction: *starts_transaction,
+                        is_statement: false,
+                    },
+                };
+                SavepointFrameInfo {
+                    kind,
+                    start_offset: sp.start_offset.load(Ordering::Acquire),
+                    write_offset: sp.write_offset.load(Ordering::Acquire),
+                    db_size: sp.db_size.load(Ordering::Acquire),
+                    wal_max_frame: sp.wal_max_frame.load(Ordering::Acquire),
+                    wal_checksum: *sp.wal_checksum.read(),
+                    deferred_fk: sp.deferred_fk_violations.load(Ordering::Acquire) as i64,
+                }
+            })
+            .collect()
     }
 
     /// Flush all dirty pages to disk (async/re-entrant).

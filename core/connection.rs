@@ -1992,6 +1992,34 @@ impl Connection {
         self.pager.load().wal_handle()
     }
 
+    /// Verification-only: the aristo-instr `expose_pub` raises this to a public
+    /// `inspect_savepoint_stack()` returning an owned snapshot of the main
+    /// pager's savepoint stack (outermost..innermost), so the conformance
+    /// harness can assert on per-frame restore state. Delegates to the
+    /// pub(crate) `Pager::inspect_savepoint_stack`; mirrors the WAL/page-cache
+    /// handle-accessor precedents.
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_savepoint_stack")]
+    fn savepoint_stack(&self) -> Vec<crate::storage::pager::SavepointFrameInfo> {
+        self.pager.load().inspect_savepoint_stack()
+    }
+
+    /// Verification-only: the aristo-instr `expose_pub` raises this to a public
+    /// `inspect_named_savepoints()` returning this connection's named-savepoint
+    /// mirror as `(name, starts_transaction)` pairs (outermost..innermost), so
+    /// the harness can cross-check the connection-side stack against the pager
+    /// stack exposed by `inspect_savepoint_stack`.
+    #[cfg(feature = "aristo-instr")]
+    #[aristo::instrument::expose_pub(as = "inspect_named_savepoints")]
+    fn named_savepoints_mirror(&self) -> Vec<(String, bool)> {
+        self.with_named_savepoints(|frames| {
+            frames
+                .iter()
+                .map(|f| (f.name.clone(), f.starts_transaction))
+                .collect()
+        })
+    }
+
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn wal_get_frame(&self, frame_no: u64, frame: &mut [u8]) -> Result<WalFrameInfo> {
         use crate::storage::sqlite3_ondisk::parse_wal_frame_header;
